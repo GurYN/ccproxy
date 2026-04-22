@@ -9,7 +9,17 @@ Type=simple
 # Replace with the user that owns ~/.claude on this host. ccproxy inherits
 # that user's Claude Code auth, MCP servers, skills, and subagents.
 User=%i
-EnvironmentFile=/etc/ccproxy/env
+
+# Baseline paths. State (SQLite, ephemeral workspaces, capture files) lives
+# under /var/lib; config is declarative in /etc. Override per-host in
+# /etc/ccproxy/env (EnvironmentFile below) rather than editing this unit.
+Environment=CCPROXY_STATE=/var/lib/ccproxy
+Environment=CCPROXY_CONFIG=/etc/ccproxy/config.yaml
+
+# Optional deploy-time overrides (listen addr, metrics addr, log format,
+# first-boot token seed). Leading `-` means "ignore if missing."
+EnvironmentFile=-/etc/ccproxy/env
+
 ExecStart=/usr/local/bin/ccproxy serve
 Restart=on-failure
 RestartSec=2s

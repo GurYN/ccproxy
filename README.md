@@ -34,6 +34,8 @@ go build -o ccproxy ./cmd/ccproxy
 
 ## Quick start
 
+Local dev loop, running from a cloned source tree:
+
 ```sh
 # 1. set up env (defaults are dev-friendly)
 cp .env.example .env
@@ -50,6 +52,50 @@ after first boot and rotate/revoke the auto-minted one.
 `.env` is auto-loaded from CWD via `joho/godotenv`. Existing env vars always win.
 
 If you're hacking on the code instead of running an installed binary, swap `ccproxy` for `go run ./cmd/ccproxy` in the commands above.
+
+### Running an installed binary
+
+`go install` drops `ccproxy` into `$GOBIN` but ships no config files — you pick the paths. ccproxy resolves `config.yaml` in this order: `--config <path>` → `$CCPROXY_CONFIG` → `$CCPROXY_STATE/config.yaml` → `./ccproxy.yaml`. State (`tokens.db`, `captures/`) lives in `$CCPROXY_STATE` (default `/var/lib/ccproxy`).
+
+**Personal / single-user setup.** Create a state dir, drop a minimal `config.yaml` in it, export the relevant env vars in your shell rc (`~/.zshrc`, `~/.bashrc`):
+
+```sh
+mkdir -p ~/.config/ccproxy
+
+cat > ~/.config/ccproxy/config.yaml <<'EOF'
+allow_passthrough_models: true
+default_claude_model: sonnet
+EOF
+
+# --- add to your shell rc ---
+export CCPROXY_STATE=~/.config/ccproxy         # required: where tokens.db + captures/ live
+# export CCPROXY_CONFIG=~/.config/ccproxy/config.yaml   # optional — picked up from $CCPROXY_STATE by default
+export CCPROXY_LISTEN=127.0.0.1:4141           # optional: default is :4141 (all interfaces)
+# export CCPROXY_METRICS_LISTEN=127.0.0.1:9101 # optional: enable /metrics on a separate port
+# export CCPROXY_LOG_FORMAT=text               # optional: force text logs even when piped
+# export CCPROXY_TOKEN=ccp_...                 # optional first-boot seed; leave empty to auto-mint
+
+ccproxy serve                                   # banner prints the first bearer
+```
+
+That's enough for passthrough-only use (`model: "sonnet"` on the wire). Add workspaces and aliases later — see [`deploy/config.yaml.example`](deploy/config.yaml.example). Full env var reference is in the [Configuration](#configuration) section below.
+
+**Server / systemd setup:** split config (declarative) from state (mutable):
+
+```sh
+sudo useradd --system --home /var/lib/ccproxy --shell /usr/sbin/nologin ccproxy
+sudo mkdir -p /etc/ccproxy /var/lib/ccproxy
+sudo chown ccproxy:ccproxy /var/lib/ccproxy
+sudo cp config.yaml /etc/ccproxy/config.yaml
+```
+
+Then point the systemd unit at both — the template in `deploy/ccproxy.service` already uses `CCPROXY_STATE=/var/lib/ccproxy` and `CCPROXY_CONFIG=/etc/ccproxy/config.yaml`, plus an optional `EnvironmentFile=-/etc/ccproxy/env` for deploy-time overrides (listen addr, metrics listener). On first `systemctl start`, grep the journal for the banner:
+
+```sh
+journalctl -u ccproxy | grep -A5 "auto-minted"
+```
+
+**No `.env` in production.** `.env` is a dev-loop convenience — it's only read from CWD when you run `ccproxy serve` interactively. Under systemd, use `Environment=` / `EnvironmentFile=`; under Docker, use `environment:` in compose.
 
 ## Module layout
 
@@ -233,9 +279,20 @@ Resolution order (first match wins):
 4. `./ccproxy.yaml`
 A config file is **required** — startup fails with a clear error if none is found. The minimal valid config is just `allow_passthrough_models: true` (which is the default), letting clients drive ccproxy with bare `model: "haiku"` requests without declaring any aliases.
 
-Env vars are intentionally minimal — behavior lives in YAML. Deploy-time overrides: `CCPROXY_LISTEN`, `CCPROXY_METRICS_LISTEN`, `CCPROXY_STATE`. First-boot seed: `CCPROXY_TOKEN` (optional; if empty, ccproxy auto-mints a bearer and logs it once in a startup banner).
+Env vars are intentionally minimal — behavior lives in YAML. Full reference:
 
-A documented schema sample lives at [`deploy/config.yaml.example`](deploy/config.yaml.example).
+| Variable | Purpose | Default |
+|---|---|---|
+| `CCPROXY_CONFIG` | Explicit path to `config.yaml`. Overrides the resolver below. | unset |
+| `CCPROXY_STATE` | State dir: SQLite token DB, ephemeral workspaces, `captures/`. | `/var/lib/ccproxy` |
+| `CCPROXY_LISTEN` | HTTP listener bind address. | `:4141` |
+| `CCPROXY_METRICS_LISTEN` | Prometheus `/metrics` listener (separate port, no auth). | unset (disabled) |
+| `CCPROXY_TOKEN` | First-boot bearer seed in `ccp_<prefix>_<secret>` format. Ignored after the token DB has at least one row. | unset (auto-mint) |
+| `CCPROXY_LOG_FORMAT` | `json` or `text`. Auto-detects from TTY when unset. | auto |
+
+Reference templates: [`deploy/env.example`](deploy/env.example) for systemd `EnvironmentFile=`, [`.env.example`](.env.example) for local dev.
+
+A documented schema sample for `config.yaml` lives at [`deploy/config.yaml.example`](deploy/config.yaml.example).
 
 ## Debug capture
 
