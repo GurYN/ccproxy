@@ -114,7 +114,7 @@ sources/
 │   ├── server/            # HTTP wiring, middleware, debug capture, graceful shutdown
 │   ├── session/           # persistent session registry, TTL eviction, --resume plumbing
 │   ├── translate/         # the only package that bridges OpenAI ↔ Claude. Verbosity modes live here.
-│   └── workspace/         # PRD §6.4 resolution chain + ephemeral dir lifecycle
+│   └── workspace/         # resolution chain + ephemeral dir lifecycle
 ├── tests/integration/     # //go:build integration (real `claude` binary required)
 ├── deploy/                # systemd unit, compose example, config template
 ├── Dockerfile             # container image; build from this dir
@@ -261,7 +261,7 @@ Final resolution order for the underlying claude model (first non-empty wins): `
 
 ### Workspace (where Claude runs)
 
-Claude Code needs a working directory: where file reads, writes, and shell commands happen. ccproxy resolves one per request using this chain (first hit wins, PRD §6.4):
+Claude Code needs a working directory: where file reads, writes, and shell commands happen. ccproxy resolves one per request using this chain (first hit wins):
 
 1. **`X-CC-Workspace: <name>`** request header. Looked up in `config.yaml` under `workspaces:`. Requires the bearer to have `workspace:<name>` (or `workspace:*`) scope.
 2. **The alias's `workspace:` field** in `config.yaml`. Static per-alias binding.
@@ -406,7 +406,7 @@ The `claude` subprocess and HTTP unit tests use a `TestHelperProcess`-style fake
 | `github.com/google/uuid` | Trace IDs, session ids |
 | `github.com/joho/godotenv` | `.env` auto-loader |
 | `github.com/prometheus/client_golang` | `/metrics` |
-| `golang.org/x/crypto/argon2` | Token hashing (PRD §6.6) |
+| `golang.org/x/crypto/argon2` | Token hashing |
 | `golang.org/x/time/rate` | Per-token RPM bucket |
 | `gopkg.in/yaml.v3` | Config parser |
 | `modernc.org/sqlite` | Token store + daily counter (pure Go, no CGO) |
