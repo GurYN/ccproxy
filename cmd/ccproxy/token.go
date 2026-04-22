@@ -19,9 +19,15 @@ import (
 
 func runToken(ctx context.Context, args []string) error {
 	if len(args) == 0 {
+		tokenUsage()
 		return errors.New("ccproxy token: subcommand required (create | list | revoke | rotate | update)")
 	}
 	sub, rest := args[0], args[1:]
+
+	if sub == "-h" || sub == "--help" || sub == "help" {
+		tokenUsage()
+		return nil
+	}
 
 	store, err := openStoreForCLI(ctx)
 	if err != nil {
@@ -43,6 +49,19 @@ func runToken(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown token subcommand %q", sub)
 	}
+}
+
+func tokenUsage() {
+	fmt.Println(`Usage: ccproxy token <subcommand> [flags]
+
+Subcommands:
+  create   Mint a new bearer token
+  list     Show all tokens (including the CAPTURE flag)
+  revoke   Delete a token
+  rotate   Replace a token's bearer value in place
+  update   Change a token's flags (e.g. --debug-capture)
+
+Run 'ccproxy token <subcommand> --help' for flag details.`)
 }
 
 // openStoreForCLI reuses the env-file + config loading flow so the CLI
@@ -109,7 +128,15 @@ func tokenCreate(ctx context.Context, store *auth.Store, args []string) error {
 	return nil
 }
 
-func tokenList(ctx context.Context, store *auth.Store, _ []string) error {
+func tokenList(ctx context.Context, store *auth.Store, args []string) error {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Println("Usage: ccproxy token list")
+		fmt.Println("  Lists all tokens with scopes, capture flag, and timestamps.")
+		return nil
+	}
+	if len(args) > 0 {
+		return fmt.Errorf("ccproxy token list takes no arguments (got %v)", args)
+	}
 	tokens, err := store.List(ctx)
 	if err != nil {
 		return err
@@ -141,6 +168,10 @@ func tokenList(ctx context.Context, store *auth.Store, _ []string) error {
 }
 
 func tokenRevoke(ctx context.Context, store *auth.Store, args []string) error {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Println("Usage: ccproxy token revoke <id-or-name>")
+		return nil
+	}
 	if len(args) != 1 {
 		return errors.New("usage: ccproxy token revoke <id-or-name>")
 	}
@@ -165,9 +196,17 @@ func tokenUpdate(ctx context.Context, store *auth.Store, args []string) error {
 	}
 	debugCap := fs.String("debug-capture", "", "on|off to toggle per-request JSONL capture. Leave empty to not change it.")
 
-	// Stdlib flag.Parse stops at the first non-flag token, so `<id>` has to
-	// come first. Pull it off, then parse the remainder.
-	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+	// If the user asked for help (or passed any other flag first), let the
+	// flag package handle it — it prints usage and returns flag.ErrHelp,
+	// which main() treats as a clean exit.
+	if len(args) >= 1 && strings.HasPrefix(args[0], "-") {
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		fs.Usage()
+		return errors.New("missing <id> (must be the first argument)")
+	}
+	if len(args) < 1 {
 		fs.Usage()
 		return errors.New("missing <id> (must be the first argument)")
 	}
@@ -209,6 +248,10 @@ func tokenUpdate(ctx context.Context, store *auth.Store, args []string) error {
 }
 
 func tokenRotate(ctx context.Context, store *auth.Store, args []string) error {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Println("Usage: ccproxy token rotate <id-or-name>")
+		return nil
+	}
 	if len(args) != 1 {
 		return errors.New("usage: ccproxy token rotate <id-or-name>")
 	}

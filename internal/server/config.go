@@ -90,18 +90,21 @@ func (rt *RuntimeConfig) SeedAuth(ctx context.Context, logger *slog.Logger) erro
 	return nil
 }
 
-// printFirstTokenBanner writes the one-time bearer to stderr via the logger
-// with a visually distinct banner so it is hard to miss in service logs.
-// The value cannot be recovered — operator must copy it now.
-func printFirstTokenBanner(logger *slog.Logger, bearer, name string) {
+// printFirstTokenBanner writes the one-time bearer directly to stderr with
+// a visually distinct banner so it is hard to miss. Intentionally bypasses
+// the structured logger — slog would escape the newlines and collapse the
+// banner into a single wall of text, defeating its purpose. The bearer
+// cannot be recovered, so the operator must copy it now.
+func printFirstTokenBanner(_ *slog.Logger, bearer, name string) {
 	bar := strings.Repeat("=", 72)
-	banner := "\n" + bar + "\n" +
-		"  ccproxy: no tokens in store — auto-minted a first bearer.\n" +
-		"  name:   " + name + "\n" +
-		"  bearer: " + bearer + "\n" +
-		"  COPY THIS NOW — it is not recoverable. Rotate via `ccproxy token`.\n" +
-		bar
-	logger.Warn(banner)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, bar)
+	fmt.Fprintln(os.Stderr, "  ccproxy: no tokens in store — auto-minted a first bearer.")
+	fmt.Fprintln(os.Stderr, "  name:   "+name)
+	fmt.Fprintln(os.Stderr, "  bearer: "+bearer)
+	fmt.Fprintln(os.Stderr, "  COPY THIS NOW — it is not recoverable. Rotate via `ccproxy token`.")
+	fmt.Fprintln(os.Stderr, bar)
+	fmt.Fprintln(os.Stderr)
 }
 
 // Close releases held resources. Safe to call multiple times.

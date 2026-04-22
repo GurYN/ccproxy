@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -25,9 +26,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	logger := slog.New(newLogHandler(os.Stdout))
 	slog.SetDefault(logger)
 
 	if len(os.Args) < 2 {
@@ -189,6 +188,36 @@ func loadEnvFile(path string, explicit bool) error {
 	default:
 		return fmt.Errorf("env-file %s: %w", path, err)
 	}
+}
+
+// newLogHandler returns a slog.Handler tuned for where the output goes:
+// TextHandler on a TTY (short, readable), JSONHandler otherwise (pipes,
+// journald, Docker log drivers). Override by setting CCPROXY_LOG_FORMAT to
+// `json` or `text` explicitly.
+func newLogHandler(w *os.File) slog.Handler {
+	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
+	format := strings.ToLower(os.Getenv("CCPROXY_LOG_FORMAT"))
+	if format == "" {
+		if isTerminal(w) {
+			format = "text"
+		} else {
+			format = "json"
+		}
+	}
+	if format == "text" {
+		return slog.NewTextHandler(w, opts)
+	}
+	return slog.NewJSONHandler(w, opts)
+}
+
+// isTerminal reports whether f is a character device (stdin/stdout pointed
+// at a real terminal). Works on linux/darwin without golang.org/x/term.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 // fsExplicit reports whether the named flag was actually set on the command

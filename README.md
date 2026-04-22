@@ -27,7 +27,7 @@ Pin a specific version with `@v0.2.0`, or track main with `@main`. Make sure `$(
 
 ```sh
 git clone https://github.com/guryn/ccproxy.git
-cd ccproxy
+cd ccproxy/sources            # Go module root
 go build -o ccproxy ./cmd/ccproxy
 ./ccproxy version
 ```
@@ -53,20 +53,27 @@ If you're hacking on the code instead of running an installed binary, swap `ccpr
 
 ## Module layout
 
+Everything below lives under `sources/` in the repo (the Go module root).
+
 ```
-ccproxy/
-├── cmd/ccproxy/         # CLI entrypoint. Subcommands: serve | token | version
-└── internal/
-    ├── auth/            # SQLite-backed token store, argon2id, scopes, in-memory cache
-    ├── claude/          # `claude -p --output-format stream-json` subprocess wrapper
-    ├── config/          # YAML loader (config.yaml schema + deploy-time env overrides)
-    ├── obs/             # Prometheus metrics + instrumentation middleware
-    ├── openai/          # OpenAI request/response/SSE types — knows nothing about Claude
-    ├── ratelimit/       # per-token rpm bucket + persistent daily token counter
-    ├── server/          # HTTP wiring, middleware, graceful shutdown — owns no business logic
-    ├── session/         # persistent session registry, TTL eviction, --resume plumbing
-    ├── translate/       # the only package that bridges OpenAI ↔ Claude. Verbosity modes live here.
-    └── workspace/       # PRD §6.4 resolution chain + ephemeral dir lifecycle
+sources/
+├── cmd/ccproxy/           # CLI entrypoint. Subcommands: serve | token | version
+├── internal/
+│   ├── auth/              # SQLite-backed token store, argon2id, scopes, in-memory cache
+│   ├── claude/            # `claude -p --output-format stream-json` subprocess wrapper
+│   ├── config/            # YAML loader (config.yaml schema + deploy-time env overrides)
+│   ├── obs/               # Prometheus metrics + instrumentation middleware
+│   ├── openai/            # OpenAI request/response/SSE types — knows nothing about Claude
+│   ├── ratelimit/         # per-token rpm bucket + persistent daily token counter
+│   ├── server/            # HTTP wiring, middleware, debug capture, graceful shutdown
+│   ├── session/           # persistent session registry, TTL eviction, --resume plumbing
+│   ├── translate/         # the only package that bridges OpenAI ↔ Claude. Verbosity modes live here.
+│   └── workspace/         # PRD §6.4 resolution chain + ephemeral dir lifecycle
+├── tests/integration/     # //go:build integration — real `claude` binary required
+├── deploy/                # systemd unit, compose example, config template
+├── Dockerfile             # container image; build from this dir
+├── Makefile               # test / test-race / test-integration / build / release
+└── LICENSE
 ```
 
 **Boundary rule:** `openai/` and `claude/` know nothing about each other. `translate/` is the only bridge — keeps the door open for non-Claude backends without speculative abstraction.
@@ -74,23 +81,21 @@ ccproxy/
 ## Common commands
 
 ```sh
-go build ./...                           # compile everything
-go vet ./...                             # static checks
-go test ./...                            # full test suite
+make build                               # compile everything
+make vet                                 # static checks
+make test                                # unit test suite
+make test-race                           # with race detector
+make test-integration                    # real `claude` binary required
+make release                             # static, stripped, trimpath release binary
+
+# or the raw equivalents:
 go test ./internal/server/... -v         # one package, verbose
-go test ./... -race                      # with race detector
 go run ./cmd/ccproxy version             # print build info
 go run ./cmd/ccproxy serve --help        # serve flag list
 go run ./cmd/ccproxy token list          # admin
 ```
 
-Build a release binary:
-
-```sh
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ccproxy ./cmd/ccproxy
-```
-
-The binary is a single static file; no CGO (the SQLite driver is `modernc.org/sqlite`).
+The release binary is a single static file; no CGO (the SQLite driver is `modernc.org/sqlite`).
 
 ## CLI subcommands
 
