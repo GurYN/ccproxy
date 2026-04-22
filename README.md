@@ -259,6 +259,21 @@ Final resolution order for the underlying claude model (first non-empty wins): `
 
 `GET /v1/models` lists the configured aliases plus the three family names (when passthrough is enabled), so OpenAI clients with model pickers see all the options. Full version ids aren't enumerated — too many, evolve too fast — but they still work in the request body.
 
+### Permission mode
+
+Claude Code defaults to prompting interactively before running tools that modify the filesystem or shell. ccproxy runs it under `-p` with no TTY — so any such prompt hangs the request. The `default_permission_mode:` knob in `config.yaml` controls this, with a sensible default of `bypassPermissions` (ccproxy's threat model already gates access at the **token** layer — if a bearer has `workspace:myproject` scope, the operator already decided to trust it in that directory).
+
+Values:
+
+| Mode | Meaning | Suitable for ccproxy? |
+|---|---|---|
+| `bypassPermissions` | No prompts, all tools run | yes — the default |
+| `dontAsk` | Alias of `bypassPermissions` | yes |
+| `acceptEdits` | Auto-accept file edits, still gate Bash/other | partial — Bash calls will hang |
+| `default` / `auto` / `plan` | Interactive modes | no — will hang |
+
+Override per-alias with `permission_mode:` on a `models:` entry. Leave `default_permission_mode:` empty if you actually want claude's native behavior (not recommended under this proxy).
+
 ### Auth scopes
 
 | Scope | Grants |

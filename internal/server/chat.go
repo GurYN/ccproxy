@@ -210,6 +210,7 @@ func (s *Server) spawn(ctx context.Context, model config.Model, inv translate.Cl
 		ResumeID:           resumeID,
 		Effort:             inv.Effort,
 		ClaudeModel:        inv.ClaudeModel,
+		PermissionMode:     s.resolvePermissionMode(model),
 	})
 	if err != nil {
 		return nil, err
@@ -290,6 +291,16 @@ func (s *Server) resolveClaudeModel(r *http.Request, model config.Model) string 
 		return model.ClaudeModel
 	}
 	return s.rt.Cfg.DefaultClaudeModel
+}
+
+// resolvePermissionMode picks the claude --permission-mode value. Per-alias
+// setting wins; otherwise the top-level default. Empty means "don't pass
+// the flag" (claude uses its own default, which prompts — broken in -p mode).
+func (s *Server) resolvePermissionMode(model config.Model) string {
+	if model.PermissionMode != "" {
+		return model.PermissionMode
+	}
+	return s.rt.Cfg.DefaultPermissionMode
 }
 
 func (s *Server) defaultVerbosity() translate.Verbosity {

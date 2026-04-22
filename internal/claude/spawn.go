@@ -33,6 +33,11 @@ type Options struct {
 	// ("claude-sonnet-4-6"). ccproxy does not validate the value —
 	// claude rejects unknown ones at spawn time.
 	ClaudeModel string
+	// PermissionMode is passed via `--permission-mode <mode>` when non-empty.
+	// Accepted: default | acceptEdits | auto | dontAsk | plan | bypassPermissions.
+	// Empty = don't pass the flag (claude uses its own default, which prompts
+	// — broken under -p since there is no TTY to approve on).
+	PermissionMode string
 	// Env is appended to os.Environ for the subprocess.
 	Env []string
 	// ShutdownGrace is how long to wait after SIGINT before SIGKILL.
@@ -77,6 +82,9 @@ func Spawn(ctx context.Context, opts Options) (*Session, error) {
 	}
 	if opts.ClaudeModel != "" {
 		args = append(args, "--model", opts.ClaudeModel)
+	}
+	if opts.PermissionMode != "" {
+		args = append(args, "--permission-mode", opts.PermissionMode)
 	}
 
 	// Note: we deliberately do not bind the subprocess to ctx via

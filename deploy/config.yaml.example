@@ -29,6 +29,17 @@ default_effort: medium
 # X-CC-Claude-Model header.
 default_claude_model: sonnet
 
+# Default claude --permission-mode. ccproxy runs claude under -p (no TTY),
+# so claude's own default ("prompt interactively") will hang whenever the
+# model tries to use Write, Bash, or Edit. Pick one of:
+#   bypassPermissions — honor the trust decision made when minting the
+#                       token. Recommended for trusted LAN/Tailscale.
+#   acceptEdits       — auto-accept file edits/writes; still gate Bash.
+#   dontAsk           — never prompt (equivalent to bypassPermissions).
+#   default | auto | plan — interactive modes; do NOT use with ccproxy.
+# Override per-alias with `permission_mode:` below.
+default_permission_mode: bypassPermissions
+
 # When true (the default), clients can pass the underlying Claude model
 # directly in the OpenAI `model` field instead of a configured alias —
 # bare family names (opus|sonnet|haiku) and full ids (claude-{family}-*).

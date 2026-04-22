@@ -15,6 +15,14 @@ type Config struct {
 	DefaultVerbosity       string               `yaml:"default_verbosity"`
 	DefaultEffort          string               `yaml:"default_effort"`       // low|medium|high|xhigh|max; empty = leave to claude
 	DefaultClaudeModel     string               `yaml:"default_claude_model"` // e.g. "opus", "sonnet", "haiku" or a full model id
+	// DefaultPermissionMode is passed to `claude --permission-mode` when an
+	// alias does not override it. Claude's own default prompts interactively,
+	// which is broken under -p (no TTY). Recommended values for a proxy:
+	//   bypassPermissions — honor the trust decision already made by minting
+	//                       the token. Best for trusted LAN/Tailscale deploys.
+	//   acceptEdits       — auto-accept file writes but still gate shell etc.
+	// Leave empty to inherit claude's default (will prompt and hang).
+	DefaultPermissionMode  string               `yaml:"default_permission_mode"`
 	AllowPassthroughModels *bool                `yaml:"allow_passthrough_models"`
 	ModelVersions          map[string]string    `yaml:"model_versions"` // alias → full claude id (e.g. opus → claude-opus-4-7)
 	SessionTTL             Duration             `yaml:"session_ttl"`
@@ -87,6 +95,9 @@ type Model struct {
 	// (e.g. "opus", "sonnet", "haiku" or a full id like "claude-sonnet-4-6").
 	// Overrides Config.DefaultClaudeModel; itself overridden by X-CC-Claude-Model.
 	ClaudeModel string `yaml:"claude_model,omitempty"`
+	// PermissionMode overrides Config.DefaultPermissionMode for this alias.
+	// See Config.DefaultPermissionMode for accepted values.
+	PermissionMode string `yaml:"permission_mode,omitempty"`
 }
 
 // FindModel returns the Model with the matching id and a bool ok flag.

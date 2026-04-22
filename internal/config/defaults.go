@@ -7,12 +7,13 @@ import "time"
 // — those have no sensible defaults and must come from config or env.
 func Defaults() Config {
 	return Config{
-		Listen:           ":4141",
-		StateDir:         "/var/lib/ccproxy",
-		ClaudeBinary:     "claude",
-		DefaultVerbosity: "text-only",
-		SessionTTL:       Duration(30 * time.Minute),
-		RequestTimeout:   Duration(10 * time.Minute),
+		Listen:                ":4141",
+		StateDir:              "/var/lib/ccproxy",
+		ClaudeBinary:          "claude",
+		DefaultVerbosity:      "text-only",
+		DefaultPermissionMode: "bypassPermissions",
+		SessionTTL:            Duration(30 * time.Minute),
+		RequestTimeout:        Duration(10 * time.Minute),
 	}
 }
 
@@ -30,6 +31,9 @@ func applyDefaults(c *Config, d Config) {
 	}
 	if c.DefaultVerbosity == "" {
 		c.DefaultVerbosity = d.DefaultVerbosity
+	}
+	if c.DefaultPermissionMode == "" {
+		c.DefaultPermissionMode = d.DefaultPermissionMode
 	}
 	if c.SessionTTL == 0 {
 		c.SessionTTL = d.SessionTTL
