@@ -259,6 +259,54 @@ Final resolution order for the underlying claude model (first non-empty wins): `
 
 `GET /v1/models` lists the configured aliases plus the three family names (when passthrough is enabled), so OpenAI clients with model pickers see all the options. Full version ids aren't enumerated — too many, evolve too fast — but they still work in the request body.
 
+### Workspace (where Claude runs)
+
+Claude Code needs a working directory — where file reads, writes, and shell commands happen. ccproxy resolves one per request using this chain (first hit wins, PRD §6.4):
+
+1. **`X-CC-Workspace: <name>`** request header. Looked up in `config.yaml` under `workspaces:`. Requires the bearer to have `workspace:<name>` (or `workspace:*`) scope.
+2. **The alias's `workspace:` field** in `config.yaml`. Static per-alias binding.
+3. **Existing persistent-session workspace.** Applied by the session manager when a request reuses an `X-CC-Session` that already has a bound workspace.
+4. **Fallback: a fresh ephemeral dir** under `$CCPROXY_STATE/tmp/<uuid>/`, deleted at end-of-request (stateless) or at session TTL (persistent).
+
+Clients **never** supply free-form paths — only names that resolve against server-side config. This is the product's security perimeter.
+
+**Consequence for passthrough models** (`haiku`, `sonnet`, `opus`, full Claude ids): they carry no alias-level workspace binding, so unless the client sends `X-CC-Workspace` they land on step 4 — an ephemeral tmp dir. That's why asking a passthrough model to "create a file" appears to succeed but the file vanishes immediately. Ephemeral scratch space is the point for one-off questions; it's a surprise if you wanted real persistence.
+
+**Three ways to target a real directory:**
+
+**A. Alias with a binding** — best for clients that can be configured once (Chatbox, TypingMind, LibreChat):
+
+```yaml
+workspaces:
+  myproject:
+    path: /home/alice/projects/myproject
+models:
+  - id: myproject-code
+    workspace: myproject
+    claude_model: sonnet
+```
+
+Client then sends `{"model": "myproject-code"}`.
+
+**B. Per-request header** — most flexible, works with any model including passthrough. Requires the client to support custom headers:
+
+```
+POST /v1/chat/completions
+Authorization: Bearer ccp_...
+X-CC-Workspace: myproject
+Content-Type: application/json
+
+{"model": "haiku", "messages": [...]}
+```
+
+**C. Persistent session** — first request's workspace (from A or B) sticks to the session id and is reused until TTL:
+
+```
+X-CC-Session: my-chat-abc
+```
+
+Subsequent requests with the same session id inherit the bound workspace without respecifying it.
+
 ### Permission mode
 
 Claude Code defaults to prompting interactively before running tools that modify the filesystem or shell. ccproxy runs it under `-p` with no TTY — so any such prompt hangs the request. The `default_permission_mode:` knob in `config.yaml` controls this, with a sensible default of `bypassPermissions` (ccproxy's threat model already gates access at the **token** layer — if a bearer has `workspace:myproject` scope, the operator already decided to trust it in that directory).
