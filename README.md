@@ -1,10 +1,10 @@
 # ccproxy
 
-OpenAI-compatible HTTP proxy in front of a locally-installed Claude Code CLI. Any client that speaks `POST /v1/chat/completions` — n8n, LibreChat, Open WebUI, the `openai` SDKs — can drive Claude Code over the network. Callers inherit the host's MCP servers, skills, subagents, and Bash tool access — that's the whole product.
+OpenAI-compatible HTTP proxy in front of a locally-installed Claude Code CLI. Any client that speaks `POST /v1/chat/completions` (n8n, LibreChat, Open WebUI, the `openai` SDKs) can drive Claude Code over the network. Callers inherit the host's MCP servers, skills, subagents, and Bash tool access: that's the whole product.
 
 ## Status
 
-**Actively in development.** ccproxy is pre-1.0 — the wire surface (headers, config schema, scopes) may still shift between minor versions. Expect breaking changes; pin a specific version (`go install …@v0.x.y`) if you deploy it, and read the commit log before upgrading. Bug reports and PRs welcome.
+**Actively in development.** ccproxy is pre-1.0: the wire surface (headers, config schema, scopes) may still shift between minor versions. Expect breaking changes; pin a specific version (`go install …@v0.x.y`) if you deploy it, and read the commit log before upgrading. Bug reports and PRs welcome.
 
 ## Requirements
 
@@ -14,7 +14,7 @@ OpenAI-compatible HTTP proxy in front of a locally-installed Claude Code CLI. An
 
 ## Install
 
-The fastest path — fetches the latest tagged release from GitHub, builds, and drops the binary into `$GOBIN` (or `$(go env GOPATH)/bin`):
+The fastest path: fetches the latest tagged release from GitHub, builds, and drops the binary into `$GOBIN` (or `$(go env GOPATH)/bin`):
 
 ```sh
 go install github.com/guryn/ccproxy/cmd/ccproxy@latest
@@ -40,7 +40,7 @@ Local dev loop, running from a cloned source tree:
 # 1. set up env (defaults are dev-friendly)
 cp .env.example .env
 
-# 2. boot — first start auto-mints a bearer and prints it in a banner.
+# 2. boot: first start auto-mints a bearer and prints it in a banner.
 #    Copy the `ccp_...` value from the startup log; it is not recoverable.
 ccproxy serve
 ```
@@ -55,7 +55,7 @@ If you're hacking on the code instead of running an installed binary, swap `ccpr
 
 ### Running an installed binary
 
-`go install` drops `ccproxy` into `$GOBIN` but ships no config files — you pick the paths. ccproxy resolves `config.yaml` in this order: `--config <path>` → `$CCPROXY_CONFIG` → `$CCPROXY_STATE/config.yaml` → `./ccproxy.yaml`. State (`tokens.db`, `captures/`) lives in `$CCPROXY_STATE` (default `/var/lib/ccproxy`).
+`go install` drops `ccproxy` into `$GOBIN` but ships no config files. You pick the paths. ccproxy resolves `config.yaml` in this order: `--config <path>` → `$CCPROXY_CONFIG` → `$CCPROXY_STATE/config.yaml` → `./ccproxy.yaml`. State (`tokens.db`, `captures/`) lives in `$CCPROXY_STATE` (default `/var/lib/ccproxy`).
 
 **Personal / single-user setup.** Create a state dir, drop a minimal `config.yaml` in it, export the relevant env vars in your shell rc (`~/.zshrc`, `~/.bashrc`):
 
@@ -69,7 +69,7 @@ EOF
 
 # --- add to your shell rc ---
 export CCPROXY_STATE=~/.config/ccproxy         # required: where tokens.db + captures/ live
-# export CCPROXY_CONFIG=~/.config/ccproxy/config.yaml   # optional — picked up from $CCPROXY_STATE by default
+# export CCPROXY_CONFIG=~/.config/ccproxy/config.yaml   # optional: picked up from $CCPROXY_STATE by default
 export CCPROXY_LISTEN=127.0.0.1:4141           # optional: default is :4141 (all interfaces)
 # export CCPROXY_METRICS_LISTEN=127.0.0.1:9101 # optional: enable /metrics on a separate port
 # export CCPROXY_LOG_FORMAT=text               # optional: force text logs even when piped
@@ -78,7 +78,7 @@ export CCPROXY_LISTEN=127.0.0.1:4141           # optional: default is :4141 (all
 ccproxy serve                                   # banner prints the first bearer
 ```
 
-That's enough for passthrough-only use (`model: "sonnet"` on the wire). Add workspaces and aliases later — see [`deploy/config.yaml.example`](deploy/config.yaml.example). Full env var reference is in the [Configuration](#configuration) section below.
+That's enough for passthrough-only use (`model: "sonnet"` on the wire). Add workspaces and aliases later: see [`deploy/config.yaml.example`](deploy/config.yaml.example). Full env var reference is in the [Configuration](#configuration) section below.
 
 **Server / systemd setup:** split config (declarative) from state (mutable):
 
@@ -89,13 +89,13 @@ sudo chown ccproxy:ccproxy /var/lib/ccproxy
 sudo cp config.yaml /etc/ccproxy/config.yaml
 ```
 
-Then point the systemd unit at both — the template in `deploy/ccproxy.service` already uses `CCPROXY_STATE=/var/lib/ccproxy` and `CCPROXY_CONFIG=/etc/ccproxy/config.yaml`, plus an optional `EnvironmentFile=-/etc/ccproxy/env` for deploy-time overrides (listen addr, metrics listener). On first `systemctl start`, grep the journal for the banner:
+Then point the systemd unit at both. The template in `deploy/ccproxy.service` already uses `CCPROXY_STATE=/var/lib/ccproxy` and `CCPROXY_CONFIG=/etc/ccproxy/config.yaml`, plus an optional `EnvironmentFile=-/etc/ccproxy/env` for deploy-time overrides (listen addr, metrics listener). On first `systemctl start`, grep the journal for the banner:
 
 ```sh
 journalctl -u ccproxy | grep -A5 "auto-minted"
 ```
 
-**No `.env` in production.** `.env` is a dev-loop convenience — it's only read from CWD when you run `ccproxy serve` interactively. Under systemd, use `Environment=` / `EnvironmentFile=`; under Docker, use `environment:` in compose.
+**No `.env` in production.** `.env` is a dev-loop convenience: it's only read from CWD when you run `ccproxy serve` interactively. Under systemd, use `Environment=` / `EnvironmentFile=`; under Docker, use `environment:` in compose.
 
 ## Module layout
 
@@ -109,20 +109,20 @@ sources/
 │   ├── claude/            # `claude -p --output-format stream-json` subprocess wrapper
 │   ├── config/            # YAML loader (config.yaml schema + deploy-time env overrides)
 │   ├── obs/               # Prometheus metrics + instrumentation middleware
-│   ├── openai/            # OpenAI request/response/SSE types — knows nothing about Claude
+│   ├── openai/            # OpenAI request/response/SSE types; knows nothing about Claude
 │   ├── ratelimit/         # per-token rpm bucket + persistent daily token counter
 │   ├── server/            # HTTP wiring, middleware, debug capture, graceful shutdown
 │   ├── session/           # persistent session registry, TTL eviction, --resume plumbing
 │   ├── translate/         # the only package that bridges OpenAI ↔ Claude. Verbosity modes live here.
 │   └── workspace/         # PRD §6.4 resolution chain + ephemeral dir lifecycle
-├── tests/integration/     # //go:build integration — real `claude` binary required
+├── tests/integration/     # //go:build integration (real `claude` binary required)
 ├── deploy/                # systemd unit, compose example, config template
 ├── Dockerfile             # container image; build from this dir
 ├── Makefile               # test / test-race / test-integration / build / release
 └── LICENSE
 ```
 
-**Boundary rule:** `openai/` and `claude/` know nothing about each other. `translate/` is the only bridge — keeps the door open for non-Claude backends without speculative abstraction.
+**Boundary rule:** `openai/` and `claude/` know nothing about each other. `translate/` is the only bridge, which keeps the door open for non-Claude backends without speculative abstraction.
 
 ## Common commands
 
@@ -163,7 +163,7 @@ ccproxy version
 | `GET`  | `/v1/models` | yes | Lists model aliases from config. |
 | `GET`  | `/healthz` | no | Reports cached `claude --version`. |
 | `GET`  | `/readyz` | no | 200 if `claude --version` succeeded at boot, 503 otherwise. |
-| `GET`  | `/metrics` | no | **Separate listener** — only enabled when `CCPROXY_METRICS_LISTEN` is set. Do not expose publicly. |
+| `GET`  | `/metrics` | no | **Separate listener**, only enabled when `CCPROXY_METRICS_LISTEN` is set. Do not expose publicly. |
 
 ### Request body
 
@@ -214,7 +214,7 @@ Map of OpenAI `reasoning_effort` → `claude --effort`:
 | `high` | `--effort high` | careful |
 | `xhigh` | `--effort xhigh` | extra careful (Claude extension) |
 | `max` | `--effort max` | maximum (Claude extension) |
-| (omitted) | — | leave it to claude's default |
+| (omitted) | (nothing) | leave it to claude's default |
 
 Resolution order (first non-empty wins): `X-CC-Effort` header → request body `reasoning_effort` → model alias `effort:` → top-level `default_effort:` → unset.
 
@@ -222,7 +222,7 @@ Resolution order (first non-empty wins): `X-CC-Effort` header → request body `
 
 The `model` field accepts three kinds of value, in this lookup order:
 
-1. **A configured alias** (declared under `models:` in `config.yaml`) — gets you a workspace binding, system prompt, and per-alias effort/claude_model defaults. Best for stable client config.
+1. **A configured alias** (declared under `models:` in `config.yaml`): gets you a workspace binding, system prompt, and per-alias effort/claude_model defaults. Best for stable client config.
 2. **A bare family name**: `opus`, `sonnet`, `haiku`. Resolves through `model_versions:` in config so ops can pin which exact version each name means.
 3. **A full Claude id**: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`. Passed straight to `claude --model`.
 
@@ -257,24 +257,24 @@ Override the underlying model at call time with the `X-CC-Claude-Model` header. 
 
 Final resolution order for the underlying claude model (first non-empty wins): `X-CC-Claude-Model` header → resolved alias's `claude_model:` (or for passthrough, the resolved family/full id) → top-level `default_claude_model:` → unset (claude picks).
 
-`GET /v1/models` lists the configured aliases plus the three family names (when passthrough is enabled), so OpenAI clients with model pickers see all the options. Full version ids aren't enumerated — too many, evolve too fast — but they still work in the request body.
+`GET /v1/models` lists the configured aliases plus the three family names (when passthrough is enabled), so OpenAI clients with model pickers see all the options. Full version ids aren't enumerated (too many, evolve too fast) but they still work in the request body.
 
 ### Workspace (where Claude runs)
 
-Claude Code needs a working directory — where file reads, writes, and shell commands happen. ccproxy resolves one per request using this chain (first hit wins, PRD §6.4):
+Claude Code needs a working directory: where file reads, writes, and shell commands happen. ccproxy resolves one per request using this chain (first hit wins, PRD §6.4):
 
 1. **`X-CC-Workspace: <name>`** request header. Looked up in `config.yaml` under `workspaces:`. Requires the bearer to have `workspace:<name>` (or `workspace:*`) scope.
 2. **The alias's `workspace:` field** in `config.yaml`. Static per-alias binding.
 3. **Existing persistent-session workspace.** Applied by the session manager when a request reuses an `X-CC-Session` that already has a bound workspace.
 4. **Fallback: a fresh ephemeral dir** under `$CCPROXY_STATE/tmp/<uuid>/`, deleted at end-of-request (stateless) or at session TTL (persistent).
 
-Clients **never** supply free-form paths — only names that resolve against server-side config. This is the product's security perimeter.
+Clients **never** supply free-form paths, only names that resolve against server-side config. This is the product's security perimeter.
 
-**Consequence for passthrough models** (`haiku`, `sonnet`, `opus`, full Claude ids): they carry no alias-level workspace binding, so unless the client sends `X-CC-Workspace` they land on step 4 — an ephemeral tmp dir. That's why asking a passthrough model to "create a file" appears to succeed but the file vanishes immediately. Ephemeral scratch space is the point for one-off questions; it's a surprise if you wanted real persistence.
+**Consequence for passthrough models** (`haiku`, `sonnet`, `opus`, full Claude ids): they carry no alias-level workspace binding, so unless the client sends `X-CC-Workspace` they land on step 4, an ephemeral tmp dir. That's why asking a passthrough model to "create a file" appears to succeed but the file vanishes immediately. Ephemeral scratch space is the point for one-off questions; it's a surprise if you wanted real persistence.
 
 **Three ways to target a real directory:**
 
-**A. Alias with a binding** — best for clients that can be configured once (Chatbox, TypingMind, LibreChat):
+**A. Alias with a binding.** Best for clients that can be configured once (Chatbox, TypingMind, LibreChat):
 
 ```yaml
 workspaces:
@@ -288,7 +288,7 @@ models:
 
 Client then sends `{"model": "myproject-code"}`.
 
-**B. Per-request header** — most flexible, works with any model including passthrough. Requires the client to support custom headers:
+**B. Per-request header.** Most flexible; works with any model including passthrough. Requires the client to support custom headers:
 
 ```
 POST /v1/chat/completions
@@ -299,7 +299,7 @@ Content-Type: application/json
 {"model": "haiku", "messages": [...]}
 ```
 
-**C. Persistent session** — first request's workspace (from A or B) sticks to the session id and is reused until TTL:
+**C. Persistent session.** First request's workspace (from A or B) sticks to the session id and is reused until TTL:
 
 ```
 X-CC-Session: my-chat-abc
@@ -309,16 +309,16 @@ Subsequent requests with the same session id inherit the bound workspace without
 
 ### Permission mode
 
-Claude Code defaults to prompting interactively before running tools that modify the filesystem or shell. ccproxy runs it under `-p` with no TTY — so any such prompt hangs the request. The `default_permission_mode:` knob in `config.yaml` controls this, with a sensible default of `bypassPermissions` (ccproxy's threat model already gates access at the **token** layer — if a bearer has `workspace:myproject` scope, the operator already decided to trust it in that directory).
+Claude Code defaults to prompting interactively before running tools that modify the filesystem or shell. ccproxy runs it under `-p` with no TTY, so any such prompt hangs the request. The `default_permission_mode:` knob in `config.yaml` controls this, with a sensible default of `bypassPermissions` (ccproxy's threat model already gates access at the **token** layer: if a bearer has `workspace:myproject` scope, the operator already decided to trust it in that directory).
 
 Values:
 
 | Mode | Meaning | Suitable for ccproxy? |
 |---|---|---|
-| `bypassPermissions` | No prompts, all tools run | yes — the default |
+| `bypassPermissions` | No prompts, all tools run | yes (the default) |
 | `dontAsk` | Alias of `bypassPermissions` | yes |
-| `acceptEdits` | Auto-accept file edits, still gate Bash/other | partial — Bash calls will hang |
-| `default` / `auto` / `plan` | Interactive modes | no — will hang |
+| `acceptEdits` | Auto-accept file edits, still gate Bash/other | partial (Bash calls will hang) |
+| `default` / `auto` / `plan` | Interactive modes | no (will hang) |
 
 Override per-alias with `permission_mode:` on a `models:` entry. Leave `default_permission_mode:` empty if you actually want claude's native behavior (not recommended under this proxy).
 
@@ -340,9 +340,9 @@ Resolution order (first match wins):
 2. `$CCPROXY_CONFIG`
 3. `$CCPROXY_STATE/config.yaml`
 4. `./ccproxy.yaml`
-A config file is **required** — startup fails with a clear error if none is found. The minimal valid config is just `allow_passthrough_models: true` (which is the default), letting clients drive ccproxy with bare `model: "haiku"` requests without declaring any aliases.
+A config file is **required**: startup fails with a clear error if none is found. The minimal valid config is just `allow_passthrough_models: true` (which is the default), letting clients drive ccproxy with bare `model: "haiku"` requests without declaring any aliases.
 
-Env vars are intentionally minimal — behavior lives in YAML. Full reference:
+Env vars are intentionally minimal; behavior lives in YAML. Full reference:
 
 | Variable | Purpose | Default |
 |---|---|---|
@@ -375,19 +375,19 @@ ccproxy token update dev --debug-capture on
 ccproxy token update dev --debug-capture off
 ```
 
-`ccproxy token list` shows a `CAPTURE` column so you can see which tokens have it on. `revoke`, `rotate`, and `update` all accept either the token id or the unique name. Toggling invalidates the in-memory auth cache, so the change takes effect on the next request — no restart needed.
+`ccproxy token list` shows a `CAPTURE` column so you can see which tokens have it on. `revoke`, `rotate`, and `update` all accept either the token id or the unique name. Toggling invalidates the in-memory auth cache, so the change takes effect on the next request (no restart needed).
 
 **What lands in the file**, one JSONL line per entry:
 
 | `kind` | Payload |
 |---|---|
 | `request` | `{method, path, query, headers, body}`. `Authorization` is redacted. |
-| `event` | Raw `claude.Event` off the subprocess stream — system init, assistant deltas, tool use/result, result. |
+| `event` | Raw `claude.Event` off the subprocess stream: system init, assistant deltas, tool use/result, result. |
 | `chunk` | The OpenAI SSE chunk ccproxy emitted (streaming mode only). |
 | `response` | The full buffered JSON response (non-streaming mode only). |
 | `done` | Terminal marker (streaming mode only). |
 
-**Caveats.** Captures never rotate or prune — add a cron/logrotate rule if you leave this on. The file is opened `O_EXCL` on the request id, so duplicate trace-ids fail to capture (they don't collide in practice — UUIDs). Body size inherits the 4 MiB request cap. Capture failures never fail the request (fail-open on purpose).
+**Caveats.** Captures never rotate or prune; add a cron/logrotate rule if you leave this on. The file is opened `O_EXCL` on the request id, so duplicate trace-ids fail to capture (they don't collide in practice since they're UUIDs). Body size inherits the 4 MiB request cap. Capture failures never fail the request (fail-open on purpose).
 
 ## Testing
 
@@ -397,7 +397,7 @@ make test-race                           # with race detector
 make test-integration                    # real `claude` binary required; //go:build integration
 ```
 
-The `claude` subprocess and HTTP unit tests use a `TestHelperProcess`-style fake: the test binary re-invokes itself in helper mode (env `CCPROXY_HELPER=1` selects canned NDJSON). No real `claude` is spawned. The integration suite under `tests/integration/` exercises the server in-process via `httptest` against a real `claude` on PATH — covers streaming, non-streaming, persistent session resume, and debug capture. Tests skip cleanly when the binary is missing. Override the per-test deadline with `CCPROXY_INTEGRATION_TIMEOUT` (default 2m).
+The `claude` subprocess and HTTP unit tests use a `TestHelperProcess`-style fake: the test binary re-invokes itself in helper mode (env `CCPROXY_HELPER=1` selects canned NDJSON). No real `claude` is spawned. The integration suite under `tests/integration/` exercises the server in-process via `httptest` against a real `claude` on PATH, covering streaming, non-streaming, persistent session resume, and debug capture. Tests skip cleanly when the binary is missing. Override the per-test deadline with `CCPROXY_INTEGRATION_TIMEOUT` (default 2m).
 
 ## Dependencies
 
