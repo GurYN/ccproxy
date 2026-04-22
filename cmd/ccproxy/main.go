@@ -131,16 +131,16 @@ func runVersion(_ []string) error {
 	}
 	fmt.Printf("ccproxy %s%s\n", v, dirty)
 	fmt.Printf("  go:   %s\n", info.GoVersion)
-	fmt.Printf("  rev:  %s\n", fallback(rev+dirty, "unknown (no VCS info in build)"))
-	fmt.Printf("  when: %s\n", fallback(when, "unknown"))
-	return nil
-}
-
-func fallback(v, def string) string {
-	if v == "" || v == "-dirty" {
-		return def
+	// VCS info is only present when `go build` runs inside a git checkout.
+	// For `go install …@vX.Y.Z` (module proxy) the tag itself is the id —
+	// skip the rev/when lines rather than printing "unknown".
+	if rev != "" {
+		fmt.Printf("  rev:  %s%s\n", rev, dirty)
 	}
-	return v
+	if when != "" {
+		fmt.Printf("  when: %s\n", when)
+	}
+	return nil
 }
 
 func runServe(ctx context.Context, args []string) error {
