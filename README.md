@@ -17,7 +17,7 @@ OpenAI-compatible HTTP proxy in front of a locally-installed Claude Code CLI. An
 The fastest path — fetches the latest tagged release from GitHub, builds, and drops the binary into `$GOBIN` (or `$(go env GOPATH)/bin`):
 
 ```sh
-go install github.com/guryn/ccproxy/cmd/ccproxy@latest
+go install github.com/guryn/ccproxy/ccproxy@latest
 ccproxy version
 ```
 
