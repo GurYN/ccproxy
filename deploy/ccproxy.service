@@ -1,0 +1,33 @@
+[Unit]
+Description=ccproxy — OpenAI-compatible proxy in front of Claude Code
+Documentation=https://github.com/guryn/ccproxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace with the user that owns ~/.claude on this host. ccproxy inherits
+# that user's Claude Code auth, MCP servers, skills, and subagents.
+User=%i
+EnvironmentFile=/etc/ccproxy/env
+ExecStart=/usr/local/bin/ccproxy serve
+Restart=on-failure
+RestartSec=2s
+
+# Hardening — keep tight by default. The proxy needs the workspace dir
+# (CCPROXY_WORKSPACE) and the user's ~/.claude. Loosen ReadWritePaths if
+# Claude Code needs to edit files outside the workspace.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ccproxy
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

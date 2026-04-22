@@ -1,0 +1,12 @@
+.env
+config.yaml
+*.log
+ccproxy
+.DS_Store
+.git
+.github
+.idea
+.vscode
+deploy/
+var-state/
+README.md

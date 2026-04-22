@@ -1,0 +1,86 @@
+# ccproxy YAML config — typically lives at $CCPROXY_STATE/config.yaml.
+# Override the location with --config <path> or $CCPROXY_CONFIG.
+#
+# Top-level fields all have sensible defaults; the only required content is
+# at least one entry under `models`.
+
+# Address the HTTP listener binds to. Override at runtime with CCPROXY_LISTEN.
+listen: "0.0.0.0:4141"
+
+# Where ccproxy puts its state. Override with CCPROXY_STATE.
+state_dir: "/var/lib/ccproxy"
+
+# Path to the claude binary. Override with CCPROXY_CLAUDE_BINARY.
+claude_binary: "/usr/local/bin/claude"
+
+# Default verbosity if the request doesn't set X-CC-Verbosity.
+# One of: text-only | verbose | narrated.
+default_verbosity: text-only
+
+# Default reasoning effort. One of: low | medium | high | xhigh | max.
+# Empty = leave it unset and let claude pick its own default.
+# Overridden per-alias (see models below) and per-request (request body
+# `reasoning_effort` field, or X-CC-Effort header — header wins).
+default_effort: medium
+
+# Default underlying Claude model. Accepts aliases ("opus", "sonnet",
+# "haiku") or full ids (e.g. "claude-sonnet-4-6"). Empty = let claude pick.
+# Overridden per-alias (see models below) and per-request via the
+# X-CC-Claude-Model header.
+default_claude_model: sonnet
+
+# When true (the default), clients can pass the underlying Claude model
+# directly in the OpenAI `model` field instead of a configured alias —
+# bare family names (opus|sonnet|haiku) and full ids (claude-{family}-*).
+# Set false for strict allowlist mode where only configured aliases work.
+allow_passthrough_models: true
+
+# Pinned versions for the bare family names. When a request asks for
+# `model: "haiku"`, ccproxy spawns claude with `--model claude-haiku-4-5`
+# instead of just `--model haiku`. Lets you upgrade the whole stack by
+# bumping one yaml line. Full ids in the request bypass this map.
+model_versions:
+  opus: claude-opus-4-7
+  sonnet: claude-sonnet-4-6
+  haiku: claude-haiku-4-5
+
+# Persistent-session idle timeout. Accepts duration strings (e.g. 30m, 1h).
+session_ttl: 30m
+
+# Hard ceiling on a single request, including streaming.
+request_timeout: 10m
+
+# Named workspaces clients can target. Paths must be absolute.
+# Clients select a workspace via:
+#   - the `workspace:` field on a model alias (below), or
+#   - the X-CC-Workspace request header (M2.2).
+# Free-form paths from clients are NEVER honored — only names from this map.
+workspaces:
+  project-1:
+    path: "/home/your_home/project/project1"
+    description: "My Project 1"
+  dotfiles:
+    path: "/home/your_home/.dotfiles"
+
+# Model aliases published by GET /v1/models. Each alias optionally pins a
+# workspace, system prompt, reasoning effort, and underlying claude model.
+# The first model is the default when a request omits the `model` field.
+models:
+  - id: claude-code
+    # Inherits default_effort and default_claude_model from above.
+
+  - id: claude-code-fast
+    claude_model: haiku
+    effort: low
+
+  - id: claude-code-deep
+    claude_model: opus
+    effort: max
+
+  - id: claude-code-prj1
+    workspace: project-1
+    claude_model: sonnet
+    effort: high
+    system_prompt: |
+      You are a developer assistant working in a
+      project. Be concise.

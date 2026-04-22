@@ -1,0 +1,6 @@
+.env
+config.yaml
+*.log
+/ccproxy
+.DS_Store
+var-state

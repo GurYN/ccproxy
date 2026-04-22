@@ -1,0 +1,49 @@
+# Example compose file showing how to run ccproxy in Docker while keeping
+# the host's Claude Code installation as the source of truth.
+#
+# Usage:
+#   1. Build from the sources/ directory (the Dockerfile lives there next
+#      to go.mod):
+#        cd sources/
+#        docker build -t ccproxy:dev .
+#   2. Copy this file to docker-compose.yml, edit the volume mounts and
+#      (optionally) CCPROXY_TOKEN, then `docker compose up`.
+#
+# What's mounted (and why):
+#
+#   - The host's `claude` binary, read-only. The image ships without it.
+#   - The host user's `~/.claude` directory, read-write (config + sessions).
+#   - One or more workspace dirs that ccproxy will hand to the subprocess.
+#   - A persistent state dir for the SQLite token DB and ephemeral workspaces.
+
+services:
+  ccproxy:
+    image: ccproxy:dev
+    restart: unless-stopped
+    user: "1000:1000" # match the host user that owns ~/.claude
+    ports:
+      - "127.0.0.1:4141:4141" # bind to loopback only — front with Caddy/Tailscale for external access
+    environment:
+      # Leave CCPROXY_TOKEN empty to let ccproxy auto-mint a bearer on first
+      # boot (printed once in the container log banner). Set it to a
+      # ccp_<prefix>_<secret> value to seed a known token instead.
+      # CCPROXY_TOKEN: "ccp_REPLACE_ME"
+      CCPROXY_LISTEN: "0.0.0.0:4141"
+      CCPROXY_STATE: "/var/lib/ccproxy"
+      # CCPROXY_METRICS_LISTEN: "0.0.0.0:9101"   # uncomment to expose unauth'd /metrics on a separate port
+      # claude binary path is set in config.yaml (claude_binary: /usr/local/bin/claude).
+    volumes:
+      - /usr/local/bin/claude:/usr/local/bin/claude:ro
+      - /home/your_home/.claude:/home/nonroot/.claude
+      - /var/lib/ccproxy:/var/lib/ccproxy
+      # Mount any project workspaces you want to expose:
+      - /home/your_home/projects/somerepo:/workspaces/somerepo
+    # Optional: mount a YAML config that references those workspaces.
+    # ccproxy will pick up /var/lib/ccproxy/config.yaml automatically.
+    # configs:
+    #   - source: ccproxy_config
+    #     target: /var/lib/ccproxy/config.yaml
+
+# configs:
+#   ccproxy_config:
+#     file: ./config.yaml
