@@ -70,6 +70,10 @@ func Spawn(ctx context.Context, opts Options) (*Session, error) {
 		"-p", opts.Prompt,
 		"--output-format", "stream-json",
 		"--verbose",
+		// Without this, claude emits one `assistant` event per complete
+		// message, defeating SSE streaming. Partials give us content_block_delta
+		// text_delta events we can forward token-by-token.
+		"--include-partial-messages",
 	}
 	if opts.AppendSystemPrompt != "" {
 		args = append(args, "--append-system-prompt", opts.AppendSystemPrompt)
