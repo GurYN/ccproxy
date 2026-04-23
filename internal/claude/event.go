@@ -14,6 +14,10 @@ const (
 	EventUser      EventType = "user"
 	EventRateLimit EventType = "rate_limit_event"
 	EventResult    EventType = "result"
+	// EventStreamEvent is emitted by `claude --include-partial-messages` and
+	// carries the Anthropic Messages API event stream (message_start,
+	// content_block_delta, etc.) in its `event` field.
+	EventStreamEvent EventType = "stream_event"
 	// EventStreamError is synthesized by ccproxy when a line fails to parse
 	// or the subprocess exits abnormally — it never appears on the wire.
 	EventStreamError EventType = "stream_error"
@@ -31,7 +35,20 @@ type Event struct {
 	Assistant *AssistantEvent `json:",omitempty"`
 	User      *UserEvent      `json:",omitempty"`
 	Result    *ResultEvent    `json:",omitempty"`
+	Stream    *StreamEvent    `json:",omitempty"`
 	Err       *StreamError    `json:",omitempty"`
+}
+
+// StreamEvent is the inner Anthropic Messages stream event carried by
+// `{"type":"stream_event","event":{...}}` lines. We only decode the fields
+// needed for incremental delta forwarding — other shapes survive via Raw.
+type StreamEvent struct {
+	Type  string `json:"type"` // message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop
+	Index int    `json:"index"`
+	Delta struct {
+		Type string `json:"type"` // text_delta, input_json_delta, thinking_delta, ...
+		Text string `json:"text"`
+	} `json:"delta"`
 }
 
 // SystemEvent is `{"type":"system","subtype":"init"|"hook_started"|...}`.
@@ -204,6 +221,14 @@ func parseLine(line []byte) (Event, error) {
 			return Event{}, fmt.Errorf("parse result: %w", err)
 		}
 		ev.Result = &r
+	case EventStreamEvent:
+		var wrap struct {
+			Event StreamEvent `json:"event"`
+		}
+		if err := json.Unmarshal(line, &wrap); err != nil {
+			return Event{}, fmt.Errorf("parse stream_event: %w", err)
+		}
+		ev.Stream = &wrap.Event
 	}
 	return ev, nil
 }

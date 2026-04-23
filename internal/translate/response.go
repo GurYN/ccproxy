@@ -22,6 +22,10 @@ type Translator struct {
 	roleEmitted    bool
 	toolCallIndex  int
 	toolCallByID   map[string]int // tool_use.id → emitted tool_calls index
+	// partialTextSeen is set when we've already streamed text via
+	// content_block_delta events, so the terminal `assistant` event's
+	// text content items must be suppressed to avoid duplication.
+	partialTextSeen bool
 }
 
 // EventToChunks projects one Claude Code event into zero or more OpenAI
@@ -42,6 +46,8 @@ func (t *Translator) EventToChunks(ev claude.Event) []openai.ChatChunk {
 
 func (t *Translator) textOnly(ev claude.Event) []openai.ChatChunk {
 	switch ev.Type {
+	case claude.EventStreamEvent:
+		return t.streamDelta(ev.Stream)
 	case claude.EventAssistant:
 		return t.assistantText(ev.Assistant)
 	case claude.EventResult:
@@ -57,7 +63,8 @@ func (t *Translator) textOnly(ev claude.Event) []openai.ChatChunk {
 }
 
 func (t *Translator) assistantText(a *claude.AssistantEvent) []openai.ChatChunk {
-	if a == nil {
+	if a == nil || t.partialTextSeen {
+		// Text already streamed via content_block_delta; don't re-emit.
 		return nil
 	}
 	var text string
@@ -72,10 +79,27 @@ func (t *Translator) assistantText(a *claude.AssistantEvent) []openai.ChatChunk 
 	return []openai.ChatChunk{t.chunk(t.deltaWithRole(openai.Delta{Content: text}), nil)}
 }
 
+// streamDelta forwards Anthropic content_block_delta events as incremental
+// OpenAI chunks. Only text_delta is projected today; input_json_delta and
+// thinking_delta are ignored (the terminal `assistant` event still carries
+// the assembled tool_use/thinking blocks for verbose mode).
+func (t *Translator) streamDelta(se *claude.StreamEvent) []openai.ChatChunk {
+	if se == nil || se.Type != "content_block_delta" {
+		return nil
+	}
+	if se.Delta.Type != "text_delta" || se.Delta.Text == "" {
+		return nil
+	}
+	t.partialTextSeen = true
+	return []openai.ChatChunk{t.chunk(t.deltaWithRole(openai.Delta{Content: se.Delta.Text}), nil)}
+}
+
 // --- verbose -----------------------------------------------------------
 
 func (t *Translator) verbose(ev claude.Event) []openai.ChatChunk {
 	switch ev.Type {
+	case claude.EventStreamEvent:
+		return t.streamDelta(ev.Stream)
 	case claude.EventAssistant:
 		return t.assistantVerbose(ev.Assistant)
 	case claude.EventUser:
@@ -108,7 +132,7 @@ func (t *Translator) assistantVerbose(a *claude.AssistantEvent) []openai.ChatChu
 	for _, c := range a.Message.Content {
 		switch c.Type {
 		case "text":
-			if c.Text == "" {
+			if c.Text == "" || t.partialTextSeen {
 				continue
 			}
 			out = append(out, t.chunk(t.deltaWithRole(openai.Delta{Content: c.Text}), nil))
@@ -176,6 +200,8 @@ func (t *Translator) userVerbose(u *claude.UserEvent) []openai.ChatChunk {
 
 func (t *Translator) narrated(ev claude.Event) []openai.ChatChunk {
 	switch ev.Type {
+	case claude.EventStreamEvent:
+		return t.streamDelta(ev.Stream)
 	case claude.EventAssistant:
 		return t.assistantNarrated(ev.Assistant)
 	case claude.EventUser:
@@ -200,7 +226,7 @@ func (t *Translator) assistantNarrated(a *claude.AssistantEvent) []openai.ChatCh
 	for _, c := range a.Message.Content {
 		switch c.Type {
 		case "text":
-			if c.Text == "" {
+			if c.Text == "" || t.partialTextSeen {
 				continue
 			}
 			out = append(out, t.chunk(t.deltaWithRole(openai.Delta{Content: c.Text}), nil))
