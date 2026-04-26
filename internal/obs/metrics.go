@@ -20,6 +20,11 @@ type Metrics struct {
 	SessionEvictions   prometheus.Counter
 	ActiveSessions     prometheus.Gauge
 	ActiveSubprocesses prometheus.Gauge
+
+	// Bridge metrics (M4).
+	BridgeConnections prometheus.Gauge
+	BridgeRPCTotal    *prometheus.CounterVec
+	BridgeRPCSeconds  *prometheus.HistogramVec
 }
 
 // NewMetrics constructs Metrics with a fresh registry. Callers expose the
@@ -59,6 +64,19 @@ func NewMetrics() *Metrics {
 			Name: "ccproxy_active_subprocesses",
 			Help: "Number of `claude` subprocesses currently running.",
 		}),
+		BridgeConnections: factory.NewGauge(prometheus.GaugeOpts{
+			Name: "ccproxy_bridge_connections",
+			Help: "Number of bridge daemons currently connected.",
+		}),
+		BridgeRPCTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "ccproxy_bridge_rpc_total",
+			Help: "Bridge RPCs issued by the server, by method and result (ok|error).",
+		}, []string{"method", "result"}),
+		BridgeRPCSeconds: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "ccproxy_bridge_rpc_seconds",
+			Help:    "Bridge RPC latency in seconds, by method.",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 12), // 1ms → ~4s
+		}, []string{"method"}),
 	}
 }
 
@@ -78,4 +96,14 @@ func (m *Metrics) ActiveSubprocessesDec()  { m.ActiveSubprocesses.Dec() }
 // SSE data chunk for a given endpoint.
 func (m *Metrics) ObserveFirstChunk(endpoint string, d time.Duration) {
 	m.FirstChunkLatency.WithLabelValues(endpoint).Observe(d.Seconds())
+}
+
+// BridgeConnected and BridgeDisconnected adjust the active bridge gauge.
+func (m *Metrics) BridgeConnected()    { m.BridgeConnections.Inc() }
+func (m *Metrics) BridgeDisconnected() { m.BridgeConnections.Dec() }
+
+// ObserveBridgeRPC records one server→daemon RPC outcome.
+func (m *Metrics) ObserveBridgeRPC(method, result string, d time.Duration) {
+	m.BridgeRPCTotal.WithLabelValues(method, result).Inc()
+	m.BridgeRPCSeconds.WithLabelValues(method).Observe(d.Seconds())
 }

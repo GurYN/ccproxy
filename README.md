@@ -14,22 +14,79 @@ OpenAI-compatible HTTP proxy in front of a locally-installed Claude Code CLI. An
 
 ## Install
 
-The fastest path: fetches the latest tagged release from GitHub, builds, and drops the binary into `$GOBIN` (or `$(go env GOPATH)/bin`):
+Two **feature profiles** are available, regardless of how you install:
+
+- **A. Server only** (no bridge): the standard install. Server runs chat against ephemeral or pre-configured workspaces. No system dependencies.
+- **B. Server + bridge**: adds the optional [Bridge](#bridge) feature, where Claude Code operates on a directory mounted from a user's laptop. Requires a system FUSE library on the **server** host (the `bridge_fuse` build tag links it in) and a separate daemon binary on the **user** side.
+
+And two **installation methods**:
+
+- **Install from Go package registry** (`go install`): the fastest path. Fetches a tagged release from GitHub and drops the binary into `$GOBIN` (or `$(go env GOPATH)/bin`). Make sure that directory is on your `$PATH`. Pin a specific version with `@v0.2.0`, or track main with `@main`.
+- **Install from source**: clone the repo and `go build`. Use this when you're hacking on the code or you need a build flag the package install doesn't take.
+
+### Install from Go package registry
+
+#### A. Server only
+
+Single command:
 
 ```sh
 go install github.com/guryn/ccproxy/cmd/ccproxy@latest
 ccproxy version
 ```
 
-Pin a specific version with `@v0.2.0`, or track main with `@main`. Make sure `$(go env GOPATH)/bin` is on your `$PATH`.
+You can run `ccproxy serve` and use every feature except Bridge.
 
-### From source
+#### B. Server + bridge
+
+Two binaries to install on two different hosts.
+
+**On the server host** (the machine that runs `ccproxy serve`):
+
+1. Install a system FUSE library:
+   - macOS: install [FUSE-T](https://www.fuse-t.org/) (recommended, no kext) or `brew install --cask macfuse`.
+   - Linux: `sudo apt install libfuse-dev` (Debian/Ubuntu) or `sudo dnf install fuse-devel` (Fedora).
+2. Install the server binary **with the `bridge_fuse` build tag** so it links FUSE:
+   ```sh
+   go install -tags bridge_fuse github.com/guryn/ccproxy/cmd/ccproxy@latest
+   ccproxy version
+   ```
+
+**On each user's laptop** (the machine whose directory you want Claude Code to edit):
+
+```sh
+go install github.com/guryn/ccproxy/cmd/ccproxy-bridge@latest
+ccproxy-bridge --help
+```
+
+The daemon binary never links FUSE; no system dependency, no build tag.
+
+Continue with [Bridge](#bridge) for setup (token minting, daemon flags, the resolution chain).
+
+### Install from source
 
 ```sh
 git clone https://github.com/guryn/ccproxy.git
 cd ccproxy/sources            # Go module root
+```
+
+#### A. Server only
+
+```sh
 go build -o ccproxy ./cmd/ccproxy
 ./ccproxy version
+```
+
+#### B. Server + bridge
+
+Install the FUSE library first (same packages as the `go install` path above), then:
+
+```sh
+# server with bridge support
+go build -tags bridge_fuse -o ccproxy ./cmd/ccproxy
+
+# bridge daemon (no tag, no FUSE dependency)
+go build -o ccproxy-bridge ./cmd/ccproxy-bridge
 ```
 
 ## Quick start
@@ -104,14 +161,17 @@ Everything below lives under `sources/` in the repo (the Go module root).
 ```
 sources/
 ├── cmd/ccproxy/           # CLI entrypoint. Subcommands: serve | token | version
+├── cmd/ccproxy-bridge/    # User-side daemon that exposes a local repo over an outbound websocket
 ├── internal/
 │   ├── auth/              # SQLite-backed token store, argon2id, scopes, in-memory cache
+│   ├── bridge/            # Bridge protocol, websocket transport, principal registry, FUSE mount (build tag: bridge_fuse)
+│   ├── bridgeclient/      # Daemon-side library: RPC handlers, ignore list, audit log, TTY confirm, fsnotify watcher
 │   ├── claude/            # `claude -p --output-format stream-json` subprocess wrapper
 │   ├── config/            # YAML loader (config.yaml schema + deploy-time env overrides)
 │   ├── obs/               # Prometheus metrics + instrumentation middleware
 │   ├── openai/            # OpenAI request/response/SSE types; knows nothing about Claude
 │   ├── ratelimit/         # per-token rpm bucket + persistent daily token counter
-│   ├── server/            # HTTP wiring, middleware, debug capture, graceful shutdown
+│   ├── server/            # HTTP wiring, middleware, debug capture, graceful shutdown, /bridge route
 │   ├── session/           # persistent session registry, TTL eviction, --resume plumbing
 │   ├── translate/         # the only package that bridges OpenAI ↔ Claude. Verbosity modes live here.
 │   └── workspace/         # resolution chain + ephemeral dir lifecycle
@@ -147,12 +207,16 @@ The release binary is a single static file; no CGO (the SQLite driver is `modern
 
 ```
 ccproxy serve [--config path] [--env-file path]
-ccproxy token create --name <s> [--scopes chat,workspace:myproject] [--ttl 90d] [--rpm N] [--tpd N] [--default-verbosity verbose] [--debug-capture]
+ccproxy token create --name <s> [--scopes chat,workspace:myproject] [--ttl 90d] [--rpm N] [--tpd N] [--default-verbosity verbose] [--debug-capture] [--principal alice] [--bridge]
 ccproxy token list
 ccproxy token revoke <id-or-name>
 ccproxy token rotate <id-or-name>
 ccproxy token update <id-or-name> [--debug-capture on|off]
 ccproxy version
+
+# User-side bridge daemon (separate binary)
+ccproxy-bridge --server wss://ccproxy.lan/bridge --root ~/code/myrepo \
+               [--allow-write] [--allow-exec] [--watch] [--audit ~/.cache/ccproxy-bridge/audit.log] [--confirm]
 ```
 
 ## HTTP API
@@ -161,6 +225,7 @@ ccproxy version
 |---|---|---|---|
 | `POST` | `/v1/chat/completions` | yes | Streaming + non-streaming. OpenAI-compatible. |
 | `GET`  | `/v1/models` | yes | Lists model aliases from config. |
+| `GET`  | `/bridge` | yes (`bridge:connect` scope) | Websocket upgrade for the `ccproxy-bridge` daemon. |
 | `GET`  | `/healthz` | no | Reports cached `claude --version`. |
 | `GET`  | `/readyz` | no | 200 if `claude --version` succeeded at boot, 503 otherwise. |
 | `GET`  | `/metrics` | no | **Separate listener**, only enabled when `CCPROXY_METRICS_LISTEN` is set. Do not expose publicly. |
@@ -194,6 +259,7 @@ Standard OpenAI shape, plus ccproxy extensions:
 | `X-CC-Verbosity: text-only\|verbose\|narrated` | in | Stream detail level. Falls back to per-token default, then config `default_verbosity`. |
 | `X-CC-Effort: low\|medium\|high\|xhigh\|max` | in | Same as request body `reasoning_effort`; header wins. |
 | `X-CC-Claude-Model: <name>` | in | Pick the underlying Claude model (`opus\|sonnet\|haiku` or a full id). Overrides per-alias and config defaults. |
+| `X-CC-Require-Bridge: true` | in | Fail with `412 bridge_unavailable` if the resolution chain would fall through to ephemeral but no bridge is connected for the token's principal. |
 | `X-Request-Id` | in/out | Echoed; generated if absent. Threaded into logs. |
 | `X-CC-Ignored-Params` | out | Comma list of accepted-but-ignored OpenAI fields. |
 
@@ -265,8 +331,9 @@ Claude Code needs a working directory: where file reads, writes, and shell comma
 
 1. **`X-CC-Workspace: <name>`** request header. Looked up in `config.yaml` under `workspaces:`. Requires the bearer to have `workspace:<name>` (or `workspace:*`) scope.
 2. **The alias's `workspace:` field** in `config.yaml`. Static per-alias binding.
-3. **Existing persistent-session workspace.** Applied by the session manager when a request reuses an `X-CC-Session` that already has a bound workspace.
-4. **Fallback: a fresh ephemeral dir** under `$CCPROXY_STATE/tmp/<uuid>/`, deleted at end-of-request (stateless) or at session TTL (persistent).
+3. **Active bridge for the token's principal**. When the alias has no workspace binding and a `ccproxy-bridge` daemon is connected for this principal, the request mounts the daemon's `--root` as the workspace via FUSE. See [Bridge](#bridge).
+4. **Existing persistent-session workspace.** Applied by the session manager when a request reuses an `X-CC-Session` that already has a bound workspace.
+5. **Fallback: a fresh ephemeral dir** under `$CCPROXY_STATE/tmp/<uuid>/`, deleted at end-of-request (stateless) or at session TTL (persistent).
 
 Clients **never** supply free-form paths, only names that resolve against server-side config. This is the product's security perimeter.
 
@@ -330,7 +397,104 @@ Override per-alias with `permission_mode:` on a `models:` entry. Leave `default_
 | `session:persistent` | Use `X-CC-Session` / `session_id` for cross-request state. |
 | `workspace:<name>` | Target a specific configured workspace. |
 | `workspace:*` | Wildcard over all workspaces. |
+| `bridge:connect` | Open a `/bridge` websocket as the daemon for this token's principal. Chat tokens do **not** need this; they pick up the bridge implicitly when they share a principal with the connected daemon. |
 | `admin` | (reserved for future admin endpoints) |
+
+## Bridge
+
+The bridge lets Claude Code (running inside ccproxy on the server) operate
+on a directory that lives **on the user's laptop**, without exposing any
+inbound port. A small daemon (`ccproxy-bridge`) opens an outbound websocket
+to the server; while it's connected, chat requests authenticated with
+tokens that share the daemon's *principal* see the daemon's `--root` as
+their workspace, mounted via FUSE.
+
+### Concepts
+
+- **Principal**: an opaque owner identifier set on a token at creation
+  time (`ccproxy token create --principal alice ...`). Tokens that share
+  a principal share a bridge attachment.
+- **Bridge token**: a token with `bridge:connect` scope used by the
+  daemon itself to open `/bridge`. Created with `--bridge`.
+- **Implicit binding**: chat tokens do **not** carry a "use the bridge"
+  flag. The resolution chain consults the registry: if a bridge is
+  connected for the principal **and** the request would otherwise fall
+  through to ephemeral, it gets mounted instead.
+
+### Quick start
+
+```sh
+# 1. on the server: mint two tokens for principal "alice"
+ccproxy token create --name alice-bridge --principal alice --bridge --scopes bridge:connect
+ccproxy token create --name alice-chat   --principal alice --scopes chat
+
+# 2. on the laptop: run the daemon
+export CCPROXY_BRIDGE_TOKEN=ccp_...      # the bridge token from step 1
+ccproxy-bridge \
+  --server wss://ccproxy.lan/bridge \
+  --root ~/code/myrepo \
+  --watch \
+  --audit ~/.cache/ccproxy-bridge/audit.log
+
+# 3. anywhere: chat with the chat token, asking for an unbound model
+curl -H "Authorization: Bearer $ALICE_CHAT" \
+     -H 'Content-Type: application/json' \
+     -d '{"model":"haiku","messages":[{"role":"user","content":"list files"}]}' \
+     https://ccproxy.lan/v1/chat/completions
+```
+
+The chat request lands on the laptop's `~/code/myrepo` because: the model
+is unbound, alice has a connected bridge, the resolver picks step 3.
+
+### Daemon flags
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--server` | (required) | `wss://host/bridge`. |
+| `--root` | (required) | Directory exposed to the server. Hard boundary; symlinks that escape are denied. |
+| `--token-env` | `CCPROXY_BRIDGE_TOKEN` | Env var holding the bridge bearer. |
+| `--allow-write` | `true` | Permit write/create/mkdir/remove/rename/chmod RPCs. |
+| `--allow-exec` | `false` | Permit `exec` RPCs. **Dangerous**: a chat token sharing the principal can run shell commands as the daemon's user. Default off. |
+| `--watch` | `true` | fsnotify the root and stream change events back; lets the server invalidate FUSE caches when you edit in your editor. |
+| `--audit` | unset | Append one JSON line per RPC to this file. |
+| `--confirm` | `false` | Prompt on stdin before each write/remove/exec. |
+
+### Safety surface
+
+- **Root clamp**: every relative path is `Clean()`'d, joined to `--root`,
+  and re-checked. Symlink leaves are resolved and rejected if they escape.
+- **`.ccproxyignore`**: optional file at `--root` with glob patterns
+  (gitignore-ish). Built-in deny list always applies: `.ssh`, `.aws`,
+  `.gnupg`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `.env`, `.env.*`.
+- **Single bridge per principal**: a second connection for the same
+  principal is rejected (registry returns `bridge: principal already
+  connected`).
+- **Operator opt-in for risk**: writes are on by default but exec is off;
+  `--confirm` adds a TTY gate.
+
+### Required-bridge mode
+
+Clients that *expect* their work to land on the laptop can opt out of the
+silent ephemeral fallthrough by sending `X-CC-Require-Bridge: true`. If
+no bridge is connected the request returns `412 bridge_unavailable`
+instead of running against `/tmp/...`.
+
+### Metrics
+
+When `/metrics` is enabled:
+
+- `ccproxy_bridge_connections`: gauge of currently connected daemons.
+- `ccproxy_bridge_rpc_total{method,result}`: counter of server→daemon
+  RPCs.
+- `ccproxy_bridge_rpc_seconds{method}`: RPC latency histogram.
+
+### Limitations
+
+1. One bridge per principal at a time; a second daemon connection is rejected.
+2. Bridges live in server memory; an `ccproxy` restart drops every connection and the daemons must reconnect.
+3. macOS mounts work with both FUSE-T (recommended, no kext) and macFUSE.
+4. `git`-inside-mount works but every `.git/` access pays a round-trip; large repos feel slow.
+5. When the HTTP client disconnects mid-turn the in-flight bridge RPCs are best-effort cancelled but a write that already left the daemon may have landed.
 
 ## Configuration
 
@@ -420,6 +584,7 @@ No web framework. No ORM. Stdlib `net/http` + `database/sql`.
 - **Add a new config field:** add to `config.Config`, set a default in `Defaults()`, validate in `Validate()`, plumb to whichever consumer needs it.
 - **Add a new verbosity mode:** extend `translate.Translator.EventToChunks`. Tests live in `internal/translate/verbosity_test.go`.
 - **Change auth surface:** look at `internal/auth/store.go` and `internal/server/middleware.go`.
+- **Bridge protocol changes:** add the param/result types to `internal/bridge/protocol.go`, the FUSE-side call in `internal/bridge/fs_fuse.go`, and the daemon-side handler in `internal/bridgeclient/fs_handlers.go`. Both ends share the same constants from `protocol.go`.
 
 ## License
 

@@ -84,14 +84,55 @@ func openStoreForCLI(_ context.Context) (*auth.Store, error) {
 func tokenCreate(ctx context.Context, store *auth.Store, args []string) error {
 	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
 	name := fs.String("name", "", "Human-readable label (required)")
-	scopes := fs.String("scopes", "chat", "Comma-separated scopes (quote the value if it contains '*': --scopes 'chat,workspace:*')")
+	scopes := fs.String("scopes", "chat", "Comma-separated scopes: chat, session:persistent, workspace:<name>, workspace:*, bridge:connect, admin. Quote when it contains '*': --scopes 'chat,workspace:*'.")
 	ttl := fs.String("ttl", "", "Token lifetime, e.g. 90d, 24h. Empty = no expiry.")
-	rpm := fs.Int("rpm", 0, "Per-token rate limit in requests/minute (0 = unlimited; M2.6)")
-	tpd := fs.Int("tpd", 0, "Per-token rate limit in tokens/day (0 = unlimited; M2.6)")
+	rpm := fs.Int("rpm", 0, "Per-token rate limit in requests/minute (0 = unlimited)")
+	tpd := fs.Int("tpd", 0, "Per-token rate limit in tokens/day (0 = unlimited)")
 	verb := fs.String("default-verbosity", "", "Per-token default verbosity (text-only|verbose|narrated)")
 	debugCap := fs.Bool("debug-capture", false, "Tee every request lifecycle to $CCPROXY_STATE/captures/<req-id>.jsonl. Off by default.")
+	principal := fs.String("principal", "", "Opaque owner id (e.g. an email or username). Tokens sharing a principal share a Bridge attachment: a chat token whose request would otherwise fall through to ephemeral resolves to its principal's connected ccproxy-bridge mount instead. See README §Bridge.")
+	bridge := fs.Bool("bridge", false, "Shorthand: grant the bridge:connect scope. Use this on the credential the ccproxy-bridge daemon authenticates with; chat tokens do NOT need it. Combine with --principal so the daemon and the chat tokens are linked.")
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintln(out, "Usage: ccproxy token create --name <s> [flags]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Mints a new bearer token. The bearer is printed once and is not recoverable.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Flags:")
+		fs.PrintDefaults()
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Examples:")
+		fmt.Fprintln(out, "  # Plain chat token (default scope = chat).")
+		fmt.Fprintln(out, "  ccproxy token create --name dev")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  # Chat token with persistent sessions and one workspace.")
+		fmt.Fprintln(out, "  ccproxy token create --name alice --scopes 'chat,session:persistent,workspace:myproject'")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  # Bridge daemon credential. Pair it with a matching chat token under the same principal.")
+		fmt.Fprintln(out, "  ccproxy token create --name alice-bridge --principal alice --bridge")
+		fmt.Fprintln(out, "  ccproxy token create --name alice-chat   --principal alice --scopes chat")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  # Time-limited capture token for debugging a flaky tool call.")
+		fmt.Fprintln(out, "  ccproxy token create --name capture --ttl 24h --debug-capture")
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *bridge {
+		parsed, err := auth.ParseScopes(*scopes + ",bridge:connect")
+		if err != nil {
+			return err
+		}
+		// Replace scopes with the deduped result.
+		seen := map[string]bool{}
+		dedup := parsed[:0]
+		for _, s := range parsed {
+			if !seen[s] {
+				seen[s] = true
+				dedup = append(dedup, s)
+			}
+		}
+		*scopes = strings.Join(dedup, ",")
 	}
 	if strings.TrimSpace(*name) == "" {
 		return errors.New("--name is required")
@@ -113,12 +154,16 @@ func tokenCreate(ctx context.Context, store *auth.Store, args []string) error {
 		RateLimitTPD:     *tpd,
 		DefaultVerbosity: *verb,
 		DebugCapture:     *debugCap,
+		Principal:        strings.TrimSpace(*principal),
 	})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Created token %s (%s)\n", tok.Name, tok.ID)
 	fmt.Printf("  scopes:  %s\n", strings.Join(tok.Scopes, ", "))
+	if tok.Principal != "" {
+		fmt.Printf("  principal: %s\n", tok.Principal)
+	}
 	if tok.ExpiresAt != nil {
 		fmt.Printf("  expires: %s\n", tok.ExpiresAt.Format(time.RFC3339))
 	}

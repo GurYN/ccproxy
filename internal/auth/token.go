@@ -25,17 +25,24 @@ const (
 // Token is the persisted record minus the secret hash (which never leaves
 // the store).
 type Token struct {
-	ID            string
-	Name          string
-	Prefix        string
-	Scopes        []string
-	CreatedAt     time.Time
-	LastUsedAt    *time.Time
-	ExpiresAt     *time.Time
-	RateLimitRPM  int
-	RateLimitTPD  int
-	DebugCapture  bool
-	DefaultVerb   string
+	ID           string
+	Name         string
+	Prefix       string
+	Scopes       []string
+	CreatedAt    time.Time
+	LastUsedAt   *time.Time
+	ExpiresAt    *time.Time
+	RateLimitRPM int
+	RateLimitTPD int
+	DebugCapture bool
+	DefaultVerb  string
+	// Principal is an opaque identifier for the token's owner. Tokens
+	// sharing a principal share a bridge attachment: when a bridge daemon
+	// authenticated with principal P is connected, chat requests from
+	// tokens with the same principal whose workspace would otherwise be
+	// ephemeral resolve to the bridge mount instead. Empty principal means
+	// the token participates in no bridge.
+	Principal string
 }
 
 // IsExpired reports whether t.ExpiresAt is set and in the past.
