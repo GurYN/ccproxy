@@ -1,10 +1,26 @@
-// Command ccproxy is the OpenAI-compatible proxy in front of Claude Code.
+// Command ccproxy is a single-binary Go server that wraps a locally-installed
+// Claude Code CLI behind an OpenAI-compatible HTTP API (POST /v1/chat/completions,
+// /v1/models, ...), so any OpenAI-speaking client (n8n, LibreChat, Open WebUI)
+// can drive Claude Code over a trusted LAN or Tailscale network. Each request
+// spawns `claude -p --output-format stream-json` and the structured event
+// stream is translated into OpenAI SSE chunks; persistent sessions resume via
+// `claude -p --resume <id>`. Callers inherit the host's Claude Code config:
+// MCP servers, skills, subagents, auth.
+//
+// The server resolves the target session from (in order) the X-CC-Session
+// header, a session_id body field, a `claude-code:session=<id>` suffix on the
+// model string, or treats the request as stateless. Workspaces are resolved
+// from X-CC-Workspace, a model alias binding, an existing session's workspace,
+// or an ephemeral directory; free-form client paths are never accepted.
+// Three verbosity modes (text-only, verbose, narrated) are selected via
+// X-CC-Verbosity. Auth uses bearer tokens hashed with argon2id in SQLite,
+// scoped to chat / workspace:<name> / session:persistent / admin.
 //
 // Subcommands:
 //
 //	ccproxy serve     run the HTTP server
 //	ccproxy version   print build info
-//	ccproxy token     manage bearer tokens (M2)
+//	ccproxy token     manage bearer tokens
 package main
 
 import (

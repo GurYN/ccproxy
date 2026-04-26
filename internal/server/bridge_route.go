@@ -9,6 +9,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/guryn/ccproxy/internal/bridge"
+	"github.com/guryn/ccproxy/internal/buildver"
 	"github.com/guryn/ccproxy/internal/openai"
 )
 
@@ -60,7 +61,7 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 	helloCtx, helloCancel := context.WithTimeout(connCtx, 3*time.Second)
 	go conn.Run() // start read loop so the response can be delivered
 	resp, err := conn.Call(helloCtx, bridge.MethodHello, bridge.HelloParams{
-		ServerVersion: "ccproxy/m4",
+		ServerVersion: buildver.String("ccproxy", ""),
 	})
 	helloCancel()
 	if err != nil || resp == nil || resp.Error != nil {
