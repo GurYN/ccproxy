@@ -32,7 +32,7 @@ func TestResolve_HeaderWins(t *testing.T) {
 	}
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Header.Set(HeaderName, "vault")
-	res, err := r.Resolve(req, config.Model{ID: "m-free"})
+	res, err := r.Resolve(req, config.Model{ID: "m-free"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestResolve_HeaderUnknown(t *testing.T) {
 	}
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Header.Set(HeaderName, "no-such-thing")
-	_, err = r.Resolve(req, config.Model{ID: "m-free"})
+	_, err = r.Resolve(req, config.Model{ID: "m-free"}, "")
 	if !errors.Is(err, ErrUnknownWorkspace) {
 		t.Fatalf("err = %v, want ErrUnknownWorkspace", err)
 	}
@@ -60,7 +60,7 @@ func TestResolve_ModelBindingFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/", nil)
-	res, err := r.Resolve(req, config.Model{ID: "m-bound", Workspace: "vault"})
+	res, err := r.Resolve(req, config.Model{ID: "m-bound", Workspace: "vault"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestResolve_EphemeralDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/", nil)
-	res, err := r.Resolve(req, config.Model{ID: "m-free"})
+	res, err := r.Resolve(req, config.Model{ID: "m-free"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +92,59 @@ func TestResolve_EphemeralDefault(t *testing.T) {
 	res.Cleanup()
 	if _, err := os.Stat(res.Path); !os.IsNotExist(err) {
 		t.Errorf("ephemeral dir not cleaned up: %v", err)
+	}
+}
+
+func TestResolve_BridgePreemptsEphemeral(t *testing.T) {
+	r, err := New(newCfg(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SetBridgeLookup(func(p string) (string, bool) {
+		if p == "alice" {
+			return "/tmp/alice-mount", true
+		}
+		return "", false
+	})
+	req := httptest.NewRequest("POST", "/", nil)
+	res, err := r.Resolve(req, config.Model{ID: "m-free"}, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Bridge || res.Path != "/tmp/alice-mount" {
+		t.Errorf("expected bridge mount, got %+v", res)
+	}
+}
+
+func TestResolve_BridgeYieldsToBoundModel(t *testing.T) {
+	r, err := New(newCfg(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SetBridgeLookup(func(string) (string, bool) { return "/tmp/alice-mount", true })
+	req := httptest.NewRequest("POST", "/", nil)
+	res, err := r.Resolve(req, config.Model{ID: "m-bound", Workspace: "vault"}, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Bridge {
+		t.Errorf("model-bound workspace must win over bridge: %+v", res)
+	}
+	if res.Path != "/tmp/vault-ws" {
+		t.Errorf("path = %q", res.Path)
+	}
+}
+
+func TestResolve_RequireBridgeWithoutOne(t *testing.T) {
+	r, err := New(newCfg(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SetBridgeLookup(func(string) (string, bool) { return "", false })
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Header.Set(HeaderRequireBridge, "true")
+	if _, err := r.Resolve(req, config.Model{ID: "m-free"}, "alice"); !errors.Is(err, ErrBridgeUnavailable) {
+		t.Errorf("want ErrBridgeUnavailable, got %v", err)
 	}
 }
 

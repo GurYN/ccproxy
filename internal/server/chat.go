@@ -129,7 +129,11 @@ func pickSessionID(r *http.Request, req *openai.ChatRequest) string {
 }
 
 func (s *Server) runStateless(ctx context.Context, w http.ResponseWriter, r *http.Request, model config.Model, inv translate.ClaudeInvocation, tr *translate.Translator, streaming bool, startedAt time.Time, logger *slog.Logger) {
-	wsRes, err := s.workspace.Resolve(r, model)
+	principal := ""
+	if tok := tokenFromCtx(r.Context()); tok != nil {
+		principal = tok.Principal
+	}
+	wsRes, err := s.workspace.Resolve(r, model, principal)
 	if err != nil {
 		s.respondWorkspaceErr(w, logger, err)
 		return
@@ -324,6 +328,11 @@ func combineSystemPrompts(modelPrompt, requestPrompt string) string {
 func (s *Server) respondWorkspaceErr(w http.ResponseWriter, logger *slog.Logger, err error) {
 	if errors.Is(err, workspace.ErrUnknownWorkspace) {
 		openai.WriteError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
+	if errors.Is(err, workspace.ErrBridgeUnavailable) {
+		openai.WriteError(w, http.StatusPreconditionFailed, "bridge_unavailable",
+			"X-CC-Require-Bridge=true but no bridge is connected for this principal")
 		return
 	}
 	logger.Error("workspace resolve failed", "err", err)

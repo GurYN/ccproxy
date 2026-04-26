@@ -15,6 +15,12 @@ const (
 
 	// ScopeWorkspaceWildcard grants access to every configured workspace.
 	ScopeWorkspaceWildcard Scope = "workspace:*"
+
+	// ScopeBridgeConnect lets a token open a /bridge websocket and register
+	// the bridge daemon under the token's Principal. Chat tokens do NOT need
+	// this scope — their bridge attachment happens implicitly when they
+	// share a Principal with a connected bridge.
+	ScopeBridgeConnect Scope = "bridge:connect"
 )
 
 // WorkspaceScope returns the scope value for one named workspace.
@@ -62,7 +68,11 @@ func ParseScopes(s string) ([]string, error) {
 
 func validScope(s string) bool {
 	switch s {
-	case string(ScopeChat), string(ScopeSessionPersistent), string(ScopeAdmin), string(ScopeWorkspaceWildcard):
+	case string(ScopeChat),
+		string(ScopeSessionPersistent),
+		string(ScopeAdmin),
+		string(ScopeWorkspaceWildcard),
+		string(ScopeBridgeConnect):
 		return true
 	}
 	return strings.HasPrefix(s, "workspace:") && len(s) > len("workspace:")

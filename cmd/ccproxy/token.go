@@ -90,8 +90,26 @@ func tokenCreate(ctx context.Context, store *auth.Store, args []string) error {
 	tpd := fs.Int("tpd", 0, "Per-token rate limit in tokens/day (0 = unlimited; M2.6)")
 	verb := fs.String("default-verbosity", "", "Per-token default verbosity (text-only|verbose|narrated)")
 	debugCap := fs.Bool("debug-capture", false, "Tee every request lifecycle to $CCPROXY_STATE/captures/<req-id>.jsonl. Off by default.")
+	principal := fs.String("principal", "", "Opaque owner identifier; tokens sharing a principal share a bridge attachment.")
+	bridge := fs.Bool("bridge", false, "Shorthand: grant bridge:connect scope (use for the ccproxy-bridge daemon's own credential).")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *bridge {
+		parsed, err := auth.ParseScopes(*scopes + ",bridge:connect")
+		if err != nil {
+			return err
+		}
+		// Replace scopes with the deduped result.
+		seen := map[string]bool{}
+		dedup := parsed[:0]
+		for _, s := range parsed {
+			if !seen[s] {
+				seen[s] = true
+				dedup = append(dedup, s)
+			}
+		}
+		*scopes = strings.Join(dedup, ",")
 	}
 	if strings.TrimSpace(*name) == "" {
 		return errors.New("--name is required")
@@ -113,12 +131,16 @@ func tokenCreate(ctx context.Context, store *auth.Store, args []string) error {
 		RateLimitTPD:     *tpd,
 		DefaultVerbosity: *verb,
 		DebugCapture:     *debugCap,
+		Principal:        strings.TrimSpace(*principal),
 	})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Created token %s (%s)\n", tok.Name, tok.ID)
 	fmt.Printf("  scopes:  %s\n", strings.Join(tok.Scopes, ", "))
+	if tok.Principal != "" {
+		fmt.Printf("  principal: %s\n", tok.Principal)
+	}
 	if tok.ExpiresAt != nil {
 		fmt.Printf("  expires: %s\n", tok.ExpiresAt.Format(time.RFC3339))
 	}

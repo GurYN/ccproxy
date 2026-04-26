@@ -13,7 +13,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"path/filepath"
+
 	"github.com/guryn/ccproxy/internal/auth"
+	"github.com/guryn/ccproxy/internal/bridge"
 	"github.com/guryn/ccproxy/internal/obs"
 	"github.com/guryn/ccproxy/internal/session"
 	"github.com/guryn/ccproxy/internal/workspace"
@@ -22,11 +25,13 @@ import (
 // Server owns HTTP wiring. Stateless across requests in M2.1; M2.3 adds
 // the session registry, M2.5 adds the SQLite token store.
 type Server struct {
-	rt        RuntimeConfig
-	logger    *slog.Logger
-	workspace *workspace.Resolver
-	sessions  *session.Manager
-	metrics   *obs.Metrics
+	rt           RuntimeConfig
+	logger       *slog.Logger
+	workspace    *workspace.Resolver
+	sessions     *session.Manager
+	metrics      *obs.Metrics
+	bridges      *bridge.Registry
+	bridgeMounts *bridge.Manager
 
 	// readiness state, populated at Probe.
 	readyMu       sync.RWMutex
@@ -46,7 +51,34 @@ func New(rt RuntimeConfig, logger *slog.Logger) (*Server, error) {
 	metrics := obs.NewMetrics()
 	mgr := session.NewManager(rt.Cfg.SessionTTL.Duration(), ws)
 	mgr.SetObserver(metrics)
-	return &Server{rt: rt, logger: logger, workspace: ws, sessions: mgr, metrics: metrics}, nil
+	mounts, err := bridge.NewManager(filepath.Join(rt.Cfg.StateDir, "bridges"))
+	if err != nil {
+		return nil, fmt.Errorf("bridge mount manager: %w", err)
+	}
+	registry := bridge.NewRegistry()
+	ws.SetBridgeLookup(workspace.BridgeLookupFunc(func(principal string) (string, bool) {
+		if principal == "" {
+			return "", false
+		}
+		conn := registry.Lookup(principal)
+		if conn == nil {
+			return "", false
+		}
+		mt, err := mounts.Mount(conn)
+		if err != nil || mt == nil {
+			return "", false
+		}
+		return mt.Path, true
+	}))
+	return &Server{
+		rt:           rt,
+		logger:       logger,
+		workspace:    ws,
+		sessions:     mgr,
+		metrics:      metrics,
+		bridges:      registry,
+		bridgeMounts: mounts,
+	}, nil
 }
 
 // Probe runs `claude --version` once and caches the result for /readyz.
@@ -76,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 		s.authed(auth.ScopeChat, http.HandlerFunc(s.handleModels))))
 	mux.Handle("POST /v1/chat/completions", s.metrics.Instrument("/v1/chat/completions",
 		s.authed(auth.ScopeChat, s.withDebugCapture(http.HandlerFunc(s.handleChatCompletions)))))
+	mux.Handle("GET /bridge", s.authed(auth.ScopeBridgeConnect, http.HandlerFunc(s.handleBridge)))
 
 	return s.withTraceID(mux)
 }

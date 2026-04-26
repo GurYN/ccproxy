@@ -95,7 +95,49 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 `
-	_, err := s.db.ExecContext(ctx, schema)
+	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	// Additive migrations. Each ALTER is wrapped in a sniff so re-runs are
+	// idempotent on databases that already have the column.
+	if err := s.addColumnIfMissing(ctx, "tokens", "principal", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("add tokens.principal: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tokens_principal ON tokens(principal)`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addColumnIfMissing is a tiny sqlite-specific helper for additive schema
+// changes. SQLite has no IF NOT EXISTS for ALTER COLUMN, so we sniff
+// PRAGMA table_info first.
+func (s *Store) addColumnIfMissing(ctx context.Context, table, column, decl string) error {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
 	return err
 }
 
@@ -108,6 +150,9 @@ type CreateOptions struct {
 	RateLimitTPD     int
 	DebugCapture     bool
 	DefaultVerbosity string
+	// Principal opaquely groups tokens that should share a bridge
+	// attachment. See Token.Principal.
+	Principal string
 }
 
 // Create inserts a new token row and returns the bearer string (which
@@ -135,12 +180,14 @@ func (s *Store) Create(ctx context.Context, opts CreateOptions) (string, *Token,
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO tokens (id, name, prefix, hash, scopes, created_at, expires_at,
-                    rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb,
+                    principal)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, opts.Name, prefix, hash, scopes,
 		now.Unix(), nullableUnix(expiresAt),
 		opts.RateLimitRPM, opts.RateLimitTPD,
 		boolToInt(opts.DebugCapture), opts.DefaultVerbosity,
+		opts.Principal,
 	)
 	if err != nil {
 		return "", nil, fmt.Errorf("insert: %w", err)
@@ -156,6 +203,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		RateLimitTPD: opts.RateLimitTPD,
 		DebugCapture: opts.DebugCapture,
 		DefaultVerb:  opts.DefaultVerbosity,
+		Principal:    opts.Principal,
 	}
 	return bearer, tok, nil
 }
@@ -182,7 +230,8 @@ func (s *Store) Authenticate(ctx context.Context, bearer string) (*Token, error)
 
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, name, prefix, hash, scopes, created_at, expires_at, last_used_at,
-       rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb
+       rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb,
+       principal
 FROM tokens WHERE prefix = ?`, prefix)
 	tok, hash, err := scanToken(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -206,7 +255,8 @@ FROM tokens WHERE prefix = ?`, prefix)
 func (s *Store) List(ctx context.Context) ([]*Token, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, name, prefix, hash, scopes, created_at, expires_at, last_used_at,
-       rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb
+       rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb,
+       principal
 FROM tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -300,7 +350,8 @@ func (s *Store) Rotate(ctx context.Context, id string) (string, *Token, error) {
 
 	row := tx.QueryRowContext(ctx, `
 SELECT id, name, prefix, hash, scopes, created_at, expires_at, last_used_at,
-       rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb
+       rate_limit_rpm, rate_limit_tpd, debug_capture, default_verb,
+       principal
 FROM tokens WHERE id = ?`, id)
 	tok, _, err := scanToken(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -435,6 +486,7 @@ func scanToken(rs rowScanner) (*Token, []byte, error) {
 		&t.ID, &t.Name, &t.Prefix, &hash, &scopes,
 		&createdAt, &expiresAt, &lastUsedAt,
 		&t.RateLimitRPM, &t.RateLimitTPD, &debugCapture, &t.DefaultVerb,
+		&t.Principal,
 	); err != nil {
 		return nil, nil, err
 	}
