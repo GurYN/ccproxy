@@ -3,12 +3,19 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/guryn/ccproxy/internal/claude"
 	"github.com/guryn/ccproxy/internal/openai"
 )
+
+// systemReminderRE matches Claude Code's internal harness reminders. These
+// are injected into tool_result text by the host (e.g. "Whenever you read a
+// file, consider whether it would be malware...") and are not part of the
+// actual file/command output. Strip them before exposing results to clients.
+var systemReminderRE = regexp.MustCompile(`(?s)\s*<system-reminder>.*?</system-reminder>\s*`)
 
 // Translator carries the per-request state needed to project Claude Code
 // events into OpenAI chunks: the chunk ID, the model name to echo back,
@@ -137,27 +144,22 @@ func (t *Translator) assistantVerbose(a *claude.AssistantEvent) []openai.ChatChu
 			}
 			out = append(out, t.chunk(t.deltaWithRole(openai.Delta{Content: c.Text}), nil))
 		case "tool_use":
+			// Claude Code's tools (Bash, Read, etc.) execute server-side.
+			// Emitting them as OpenAI `tool_calls` makes clients believe
+			// THEY must execute the call and error with "unavailable tool".
+			// Render as informational content instead, with full arguments
+			// for inspection. Track the index for tool_result correlation.
 			if t.toolCallByID == nil {
 				t.toolCallByID = map[string]int{}
 			}
-			idx := t.toolCallIndex
-			t.toolCallByID[c.ID] = idx
+			t.toolCallByID[c.ID] = t.toolCallIndex
 			t.toolCallIndex++
 			args := string(c.Input)
 			if args == "" {
 				args = "{}"
 			}
-			out = append(out, t.chunk(t.deltaWithRole(openai.Delta{
-				ToolCalls: []openai.ToolCallDelta{{
-					Index: idx,
-					ID:    c.ID,
-					Type:  "function",
-					Function: &openai.FunctionCallDelta{
-						Name:      c.Name,
-						Arguments: args,
-					},
-				}},
-			}), nil))
+			line := fmt.Sprintf("\n\n**🔧 %s**\n```json\n%s\n```\n", c.Name, args)
+			out = append(out, t.chunk(t.deltaWithRole(openai.Delta{Content: line}), nil))
 		case "thinking":
 			// Thinking blocks surface only in verbose mode, prefixed so a
 			// downstream UI can choose to fold them.
@@ -181,17 +183,19 @@ func (t *Translator) userVerbose(u *claude.UserEvent) []openai.ChatChunk {
 		if c.Type != "tool_result" {
 			continue
 		}
-		// Synthetic role:"tool" delta chunk so OpenAI clients with tool
-		// awareness can attribute the result to the right tool_call.
-		body := truncate(c.TextResult(), 8<<10)
+		// Server-side tool: render the result as a fenced code block so the
+		// content (which may contain <tags>, backticks, system-reminders,
+		// etc.) renders literally instead of being parsed as inline HTML or
+		// markdown. Use a 4-backtick fence so embedded triple-backticks in
+		// the body don't break out.
+		body := truncate(stripSystemReminders(c.TextResult()), 8<<10)
+		header := "↪ result"
 		if c.IsError {
-			body = "[error] " + body
+			header = "⚠ error"
 		}
-		_ = c.ToolUseID // index could be looked up via t.toolCallByID; not needed by spec
-		out = append(out, t.chunk(openai.Delta{
-			Role:    "tool",
-			Content: body,
-		}, nil))
+		_ = c.ToolUseID
+		line := fmt.Sprintf("\n**%s**\n````\n%s\n````\n", header, body)
+		out = append(out, t.chunk(t.deltaWithRole(openai.Delta{Content: line}), nil))
 	}
 	return out
 }
@@ -247,7 +251,7 @@ func (t *Translator) userNarrated(u *claude.UserEvent) []openai.ChatChunk {
 		if c.Type != "tool_result" {
 			continue
 		}
-		head := truncate(strings.TrimSpace(c.TextResult()), 200)
+		head := truncate(strings.TrimSpace(stripSystemReminders(c.TextResult())), 200)
 		marker := "↳"
 		if c.IsError {
 			marker = "✗"
@@ -382,4 +386,8 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+func stripSystemReminders(s string) string {
+	return strings.TrimSpace(systemReminderRE.ReplaceAllString(s, "\n"))
 }
