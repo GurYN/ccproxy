@@ -7,14 +7,14 @@ import (
 )
 
 // StubHandlers is a placeholder Handlers implementation that fails every
-// call with ErrCodeUnsupported. Used in B0 to prove the protocol works
-// before B1 lands the real filesystem handlers.
+// call with ErrCodeUnsupported. Used to prove the protocol works before
+// the real filesystem handlers land.
 type StubHandlers struct{}
 
 func NewStubHandlers() Handlers { return StubHandlers{} }
 
 func unsupported() *bridge.RPCError {
-	return &bridge.RPCError{Code: bridge.ErrCodeUnsupported, Message: "filesystem handlers land in B1"}
+	return &bridge.RPCError{Code: bridge.ErrCodeUnsupported, Message: "filesystem handlers not implemented"}
 }
 
 func (StubHandlers) Stat(context.Context, bridge.StatParams) (bridge.StatResult, *bridge.RPCError) {

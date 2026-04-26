@@ -2,10 +2,6 @@
 // directory to a ccproxy server over a single outbound websocket. While
 // connected, chat requests authenticated with tokens that share the
 // daemon's principal will see this directory as their workspace.
-//
-// B0 ships only the connection plumbing: the daemon authenticates,
-// completes the hello handshake, and answers any FS RPC with
-// ErrCodeUnsupported. B1 plugs in the real filesystem handlers.
 package main
 
 import (
@@ -21,7 +17,13 @@ import (
 	"time"
 
 	"github.com/guryn/ccproxy/internal/bridgeclient"
+	"github.com/guryn/ccproxy/internal/buildver"
 )
+
+// version is overridable at build time via:
+//
+//	go build -ldflags "-X main.version=v0.3.0" ./cmd/ccproxy-bridge
+var version = ""
 
 func buildHandlers(root string, useConfirm bool, logger *slog.Logger) bridgeclient.Handlers {
 	h := bridgeclient.NewFSHandlers(root)
@@ -116,6 +118,7 @@ func run() error {
 		Watch:        *watch,
 		AuditPath:    *auditPath,
 		PingInterval: 30 * time.Second,
+		Version:      buildver.String("ccproxy-bridge", version),
 	}, buildHandlers(abs, *confirm, logger), log)
 
 	logger.Info("starting ccproxy-bridge",

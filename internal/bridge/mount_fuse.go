@@ -69,7 +69,7 @@ func (m *Manager) Mount(conn Connection) (*Mount, error) {
 
 	// Mount in a goroutine — host.Mount blocks until unmount. The empty
 	// options slice keeps platform defaults; callers wanting allow_other
-	// or noappledouble should configure in B2.
+	// or noappledouble should configure later.
 	go func() {
 		ok := host.Mount(mountPath, []string{})
 		if !ok {

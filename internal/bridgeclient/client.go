@@ -1,10 +1,6 @@
 // Package bridgeclient is the daemon side of the bridge protocol: it
 // connects an outbound websocket to ccproxy, accepts RPCs from the server,
 // and executes them against the local filesystem rooted at --root.
-//
-// The B0 milestone exposes only the protocol plumbing and the hello
-// handshake; FS handlers are stubbed and return ErrCodeUnsupported. B1
-// adds the real Stat/ReadDir/Read/Write implementations.
 package bridgeclient
 
 import (
@@ -19,6 +15,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/guryn/ccproxy/internal/bridge"
+	"github.com/guryn/ccproxy/internal/buildver"
 )
 
 // Options configures a daemon Client.
@@ -50,8 +47,8 @@ type Client struct {
 
 type loggerFunc func(level, msg string, kv ...any)
 
-// Handlers is the set of FS operations the daemon exposes. B0 ships a
-// stub via NewStubHandlers; B1 plugs in the real implementation.
+// Handlers is the set of FS operations the daemon exposes. A stub is
+// available via NewStubHandlers for protocol-only testing.
 type Handlers interface {
 	Stat(ctx context.Context, p bridge.StatParams) (bridge.StatResult, *bridge.RPCError)
 	ReadDir(ctx context.Context, p bridge.ReadDirParams) (bridge.ReadDirResult, *bridge.RPCError)
@@ -66,7 +63,7 @@ type Handlers interface {
 }
 
 // New returns an initialized client. The handlers parameter must not be
-// nil; pass NewStubHandlers() during B0 testing.
+// nil; pass NewStubHandlers() for protocol-only testing.
 func New(opts Options, handlers Handlers, log loggerFunc) *Client {
 	if log == nil {
 		log = func(string, string, ...any) {}
@@ -75,7 +72,7 @@ func New(opts Options, handlers Handlers, log loggerFunc) *Client {
 		opts.PingInterval = 30 * time.Second
 	}
 	if opts.Version == "" {
-		opts.Version = "ccproxy-bridge/m4"
+		opts.Version = buildver.String("ccproxy-bridge", "")
 	}
 	return &Client{opts: opts, logger: log, handlers: handlers}
 }
