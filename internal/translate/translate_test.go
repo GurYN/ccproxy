@@ -68,12 +68,20 @@ func TestRequestToInvocation_MultiTurnPreamble(t *testing.T) {
 	}
 }
 
-func TestRequestToInvocation_RejectsNonUserLast(t *testing.T) {
-	_, err := RequestToInvocation(&openai.ChatRequest{
+func TestRequestToInvocation_AcceptsTrailingNonUser(t *testing.T) {
+	// Clients replaying a tool round-trip may end with role=tool or
+	// role=assistant. We accept these and serialize the full convo.
+	inv, err := RequestToInvocation(&openai.ChatRequest{
 		Messages: []openai.Message{msg("user", "hi"), msg("assistant", "hi back")},
 	})
-	if err == nil {
-		t.Fatal("expected error when last message is not user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(inv.Prompt, "hi back") {
+		t.Errorf("prompt should include trailing assistant content, got %q", inv.Prompt)
+	}
+	if !strings.Contains(inv.Prompt, "Continue") {
+		t.Errorf("prompt should signal continuation, got %q", inv.Prompt)
 	}
 }
 

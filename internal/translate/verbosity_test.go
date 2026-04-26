@@ -56,29 +56,28 @@ func toolResultEvent(toolID, result string, isError bool) claude.Event {
 	}
 }
 
-func TestVerbose_ToolUseBecomesToolCallDelta(t *testing.T) {
+func TestVerbose_ToolUseBecomesContentDelta(t *testing.T) {
 	tr := newVerbose()
 	chunks := tr.EventToChunks(toolUseEvent("toolu_1", "Read", `{"file_path":"/x"}`))
 	if len(chunks) != 1 {
 		t.Fatalf("want 1 chunk, got %d", len(chunks))
 	}
 	d := chunks[0].Choices[0].Delta
-	if len(d.ToolCalls) != 1 {
-		t.Fatalf("expected one tool_calls entry, got %+v", d)
+	// Don't emit OpenAI tool_calls — Claude Code's tools execute server-side,
+	// and clients without matching tool definitions error with "unavailable
+	// tool". Render as informational content with full args for inspection.
+	if len(d.ToolCalls) != 0 {
+		t.Errorf("verbose must not emit tool_calls (clients try to execute), got %+v", d.ToolCalls)
 	}
-	tc := d.ToolCalls[0]
-	if tc.ID != "toolu_1" || tc.Type != "function" || tc.Function.Name != "Read" {
-		t.Errorf("tool call = %+v", tc)
-	}
-	if tc.Function.Arguments != `{"file_path":"/x"}` {
-		t.Errorf("arguments = %q", tc.Function.Arguments)
+	if !strings.Contains(d.Content, "Read") || !strings.Contains(d.Content, `"/x"`) {
+		t.Errorf("expected content to include tool name and args, got %q", d.Content)
 	}
 	if d.Role != "assistant" {
 		t.Errorf("first chunk should set role=assistant, got %q", d.Role)
 	}
 }
 
-func TestVerbose_ToolResultBecomesToolDelta(t *testing.T) {
+func TestVerbose_ToolResultBecomesContentDelta(t *testing.T) {
 	tr := newVerbose()
 	tr.EventToChunks(toolUseEvent("toolu_1", "Read", "{}"))
 	chunks := tr.EventToChunks(toolResultEvent("toolu_1", "hello world", false))
@@ -86,16 +85,21 @@ func TestVerbose_ToolResultBecomesToolDelta(t *testing.T) {
 		t.Fatalf("want 1 chunk, got %d", len(chunks))
 	}
 	d := chunks[0].Choices[0].Delta
-	if d.Role != "tool" || d.Content != "hello world" {
-		t.Errorf("delta = %+v", d)
+	// Role must not be "tool" — strict OpenAI clients (Vercel AI SDK)
+	// reject any role other than "assistant" in streaming deltas.
+	if d.Role == "tool" {
+		t.Errorf("delta.role must not be %q in streaming chunks", d.Role)
+	}
+	if !strings.Contains(d.Content, "hello world") {
+		t.Errorf("delta.content = %q", d.Content)
 	}
 }
 
 func TestVerbose_ToolErrorPrefixed(t *testing.T) {
 	tr := newVerbose()
 	chunks := tr.EventToChunks(toolResultEvent("toolu_x", "boom", true))
-	if got := chunks[0].Choices[0].Delta.Content; !strings.HasPrefix(got, "[error]") {
-		t.Errorf("error result should be prefixed, got %q", got)
+	if got := chunks[0].Choices[0].Delta.Content; !strings.Contains(got, "⚠ error") {
+		t.Errorf("error result should be marked, got %q", got)
 	}
 }
 

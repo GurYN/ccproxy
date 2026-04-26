@@ -63,20 +63,32 @@ func RequestToInvocation(req *openai.ChatRequest) (ClaudeInvocation, error) {
 		return ClaudeInvocation{}, fmt.Errorf("no non-system messages")
 	}
 
+	// Trailing message is normally `user`, but a client replaying a prior
+	// turn's tool round-trip may end with `tool` (after a tool_result) or
+	// `assistant` (asking us to continue). Per OpenAI semantics those are
+	// valid; we serialize the whole conversation as context in that case.
 	last := nonSystem[len(nonSystem)-1]
-	if !strings.EqualFold(last.Role, "user") {
-		return ClaudeInvocation{}, fmt.Errorf("last message must be role=user, got %q", last.Role)
-	}
+	trailingIsUser := strings.EqualFold(last.Role, "user")
 
 	var prompt strings.Builder
-	if prior := nonSystem[:len(nonSystem)-1]; len(prior) > 0 {
+	prior := nonSystem
+	if trailingIsUser {
+		prior = nonSystem[:len(nonSystem)-1]
+	}
+	if len(prior) > 0 {
 		prompt.WriteString("Conversation so far:\n")
 		for _, m := range prior {
 			fmt.Fprintf(&prompt, "%s: %s\n", strings.ToLower(m.Role), m.ContentString())
 		}
-		prompt.WriteString("\nLatest user message:\n")
+		if trailingIsUser {
+			prompt.WriteString("\nLatest user message:\n")
+		} else {
+			prompt.WriteString("\nContinue the assistant response.\n")
+		}
 	}
-	prompt.WriteString(last.ContentString())
+	if trailingIsUser {
+		prompt.WriteString(last.ContentString())
+	}
 
 	effort, ok := NormalizeEffort(req.ReasoningEffort)
 	if !ok {
